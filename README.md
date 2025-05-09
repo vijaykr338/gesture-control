@@ -57,14 +57,6 @@ jupyter notebook gesturePipeline.ipynb
 - ⚠️ Detection is unstable and lasts only a few seconds
 - 🚫 Gesture-to-action mapping not implemented yet
 
----
-
-## 📌 Known Issues
-
-- Detection flickers or fails under certain lighting/backgrounds
-- Lacks multi-class gesture support
-- Requires tight control on camera position and environment
-- No GUI or keyboard/mouse action bindings yet
 
 ---
 
