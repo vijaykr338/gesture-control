@@ -53,7 +53,7 @@ jupyter notebook gesturePipeline.ipynb
 
 - ✅ OpenVINO models successfully converted
 - ✅ Basic pipeline structure built in notebook
-- ⚠️ Can currently only detect an open palm
+- ⚠️ Can currently detect upto 5 gestures
 - ⚠️ Detection is unstable and lasts only a few seconds
 - 🚫 Gesture-to-action mapping not implemented yet
 
