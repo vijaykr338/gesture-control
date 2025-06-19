@@ -66,7 +66,7 @@ source venv/bin/activate
 The project's dependencies are listed in `requirement.txt`. Install them using pip.
 
 ```bash
-pip install -r requirement.txt
+pip install -r requirements.txt
 ```
 *(Note: The requirements file contains all packages, including development tools like Jupyter.)*
 
