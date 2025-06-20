@@ -63,7 +63,7 @@ source venv/bin/activate
 
 ### 3. Install Dependencies
 
-The project's dependencies are listed in `requirement.txt`. Install them using pip.
+The project's dependencies are listed in `requirements.txt`. Install them using pip.
 
 ```bash
 pip install -r requirements.txt
