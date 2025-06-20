@@ -1,7 +1,7 @@
 {
     "detection": {
         "input_size": 192,
-        "score_threshold": 0.75,
+        "score_threshold": 0.6,
         "nms_threshold": 0.3,
         "smoothing_alpha": 0.8,
         "iou_match_threshold": 0.3,
@@ -25,7 +25,7 @@
         "cursor_sensitivity": 2.5,
         "screen_width": 1920,
         "screen_height": 1080,
-        "enable_scroll_control": false,
+        "enable_scroll_control": true,
         "scroll_sensitivity": 6,
         "scroll_threshold": 0.02,
         "scroll_smoothing": 0.6,
@@ -160,12 +160,16 @@
         }
     },
     "app_modes": {
-        "current_mode": "disabled",
+        "current_mode": "media_mode",
         "mode_switch_cooldown": 2.0,
-        "last_mode_switch": 1750332662.440856,
+        "last_mode_switch": 1750408506.8039227,
         "debug_mode": true,
         "gesture_timings": {
-            "right_index_bent": 1750332671.2052138
+            "right_index_bent": 1750408525.9113612,
+            "left_index_bent": 1750408544.7451532,
+            "left_index_middle_bent": 1750408539.7873256,
+            "fist_gesture": 1750408500.0118618,
+            "right_index_middle_bent": 1750408617.5988429
         },
         "ppt_mode": {
             "name": "PowerPoint Mode",
@@ -196,7 +200,7 @@
         },
         "media_mode": {
             "name": "Media Player Mode",
-            "enabled": false,
+            "enabled": true,
             "gestures": {
                 "right_index_bent": {
                     "action": "key_press",
@@ -257,6 +261,6 @@
         },
         "browser_right_hand_mode": "cursor",
         "browser_iloveyou_switch_cooldown": 1.0,
-        "browser_last_iloveyou_switch": 1750332600.6946707
+        "browser_last_iloveyou_switch": 1750408436.9312122
     }
 }

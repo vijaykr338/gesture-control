@@ -238,11 +238,13 @@ class CustomModeDialog(QDialog):
         
         # Connect action type change handlers
         key_press_btn.toggled.connect(lambda checked, key=gesture_key: self._on_action_type_changed(key, checked))
-        mouse_click_btn.toggled.connect(lambda checked, key=gesture_key: self._on_action_type_changed(key, not checked))
         
-        # Make buttons mutually exclusive
-        key_press_btn.toggled.connect(lambda checked: mouse_click_btn.setChecked(not checked))
-        mouse_click_btn.toggled.connect(lambda checked: key_press_btn.setChecked(not checked))
+        # FIX: Use QButtonGroup for proper mutual exclusion instead of complex signal connections.
+        # This prevents the buttons from toggling each other when clicked again.
+        action_button_group = QButtonGroup(action_frame)
+        action_button_group.addButton(key_press_btn)
+        action_button_group.addButton(mouse_click_btn)
+        action_button_group.setExclusive(True)
         
         action_layout.addWidget(key_press_btn)
         action_layout.addWidget(mouse_click_btn)
