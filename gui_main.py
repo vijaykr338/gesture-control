@@ -12,6 +12,20 @@ from PyQt6.QtCore import Qt, QSize, QThread, QPoint, QRect, QMargins
 from gui_worker import GestureEngineWorker
 from config_manager import config_manager, ApplicationModeConfig, ApplicationModeGesture
 
+
+def get_gesture_display_name(gesture_key):
+    """Returns a user-friendly display name for a given gesture key."""
+    gesture_names = {
+        'right_index_bent': 'Right Hand: Bend INDEX finger down',
+        'left_index_bent': 'Left Hand: Bend INDEX finger down', 
+        'right_index_middle_bent': 'Right Hand: Bend INDEX + MIDDLE fingers down',
+        'left_index_middle_bent': 'Left Hand: Bend INDEX + MIDDLE fingers down',
+        'fist_gesture': 'Either Hand: Make a FIST (close all fingers)',
+        'open_palm_gesture': 'Either Hand: Show OPEN PALM (all fingers extended)',
+        'iloveyou_gesture': 'Either Hand: I LOVE YOU sign (thumb + index + pinky up)',
+    }
+    return gesture_names.get(gesture_key, gesture_key.replace('_', ' ').title())
+
 class FlowLayout(QGridLayout):
     """A layout that arranges widgets in a flowing manner."""
     def __init__(self, parent=None):
@@ -96,10 +110,14 @@ class CustomModeDialog(QDialog):
         
         # Define valid keys and buttons separately
         self.valid_mouse_buttons = ["left", "right", "middle"]
-        self.valid_keyboard_keys = config_manager.gesture_mapping.available_keys
+        # NEW: Separate keys for better UI
+        all_keys = sorted(config_manager.gesture_mapping.available_keys)
+        self.modifier_keys = sorted([k for k in all_keys if k in ['ctrl', 'alt', 'shift', 'win', 'cmd', 'option']])
+        self.primary_keys = sorted([k for k in all_keys if k not in self.modifier_keys])
+        self.all_keys_sorted = self.modifier_keys + self.primary_keys # Modifiers first
         
         self.setWindowTitle("Custom Mode Builder" if not edit_mode else f"Edit {edit_mode.replace('_', ' ').title()}")
-        self.setFixedSize(800, 600)
+        self.setMinimumSize(800, 700) # Increased height for better spacing
         self.setModal(True)
         if parent and hasattr(parent, 'styleSheet'):
             self.setStyleSheet(parent.styleSheet())
@@ -144,7 +162,9 @@ class CustomModeDialog(QDialog):
         available_gestures = [
             'right_index_bent', 'left_index_bent', 
             'right_index_middle_bent', 'left_index_middle_bent', 
-            'fist_gesture'
+            'fist_gesture',
+            'open_palm_gesture',     # ADD NEW GESTURES
+            'iloveyou_gesture'       # ADD NEW GESTURES
         ]
         
         self.gesture_widgets = {}
@@ -160,8 +180,10 @@ class CustomModeDialog(QDialog):
         # Action Buttons
         button_layout = QHBoxLayout()
         
-        cancel_btn = QPushButton("❌ Cancel")
-        save_btn = QPushButton("💾 Save Mode" if not self.edit_mode else "💾 Update Mode")
+        cancel_btn = QPushButton(" Cancel")
+        cancel_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCancelButton))
+        save_btn = QPushButton(" Save Mode" if not self.edit_mode else " Update Mode")
+        save_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton))
         
         cancel_btn.clicked.connect(self.reject)
         save_btn.clicked.connect(self.save_mode)
@@ -172,75 +194,90 @@ class CustomModeDialog(QDialog):
         layout.addLayout(button_layout)
 
     def _on_action_type_changed(self, gesture_key, is_key_press):
-        """Called when action type changes - updates the key/button to a valid default."""
+        """Called when action type changes - switches between key/mouse UI."""
         widgets = self.gesture_widgets[gesture_key]
+        widgets['action_stack'].setCurrentIndex(0 if is_key_press else 1)
         
-        if is_key_press:
-            # Switched to Key Press - default to 'space'
-            widgets['current_key'] = 'space'
-            self.update_key_display(gesture_key, 'space')
-        else:
-            # Switched to Mouse Click - default to 'left'
-            widgets['current_key'] = 'left'
-            self.update_key_display(gesture_key, 'left')
-
+        # if is_key_press:
+        #     # Switched to Key Press - default to 'space'
+        #     widgets['current_key'] = 'space'
+        #     self.update_key_display(gesture_key, 'space')
+        # else:
+        #     # Switched to Mouse Click - default to 'left'
+        #     widgets['current_key'] = 'left'
+        #     self.update_key_display(gesture_key, 'left')  
+          
     def create_gesture_card(self, gesture_key):
         """Create a card for configuring a single gesture."""
         card = QFrame()
         card.setFrameStyle(QFrame.Shape.StyledPanel)
         card.setStyleSheet("""
             QFrame {
-                background-color: #111111;
-                border: 1px solid #222222;
+                background-color: #2d2d30;
+                border: 1px solid #3e3e42;
                 border-radius: 8px;
                 margin: 4px;
                 padding: 12px;
             }
         """)
         
-        layout = QVBoxLayout(card)    
-
-        gesture_name = self.get_gesture_display_name(gesture_key)
+        layout = QVBoxLayout(card)
+        
+        gesture_name = get_gesture_display_name(gesture_key)
         name_label = QLabel(gesture_name)
         name_label.setStyleSheet("""
             font-weight: 700;
             font-size: 14px;
-            color: #00ffff;
+            color: #ffffff;
             padding: 6px;
-            background-color: #000000;
+            background-color: #1e1e1e;
             border-radius: 4px;
             margin-bottom: 8px;
         """)
         layout.addWidget(name_label)
         
-        controls_layout = QGridLayout()
-        
+        controls_layout = QGridLayout()        
         enable_cb = QCheckBox("Enable this gesture")
+        enable_cb.setStyleSheet("""
+            QCheckBox {
+                color: #ffffff;
+                font-weight: bold;
+                spacing: 8px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border: 2px solid #5a5a5a;
+                border-radius: 3px;
+                background-color: #1e1e1e;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #0078d4;
+                border-color: #0078d4;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #0078d4;
+            }
+        """)
         enable_cb.toggled.connect(lambda checked, key=gesture_key: self.toggle_gesture_controls(key, checked))
         controls_layout.addWidget(enable_cb, 0, 0, 1, 2)
-        
         controls_layout.addWidget(QLabel("Description:"), 1, 0)
         desc_edit = QLineEdit()
-        desc_edit.setEnabled(False)
         controls_layout.addWidget(desc_edit, 1, 1)
         
         controls_layout.addWidget(QLabel("Action Type:"), 2, 0)
         action_frame = QFrame()
         action_layout = QHBoxLayout(action_frame)
-        action_layout.setContentsMargins(0, 0, 0, 0)
-        
-        key_press_btn = QPushButton("⌨️ Key Press")
-        mouse_click_btn = QPushButton("🖱️ Mouse Click")
+        action_layout.setContentsMargins(0, 0, 0, 0)        
+        key_press_btn = QPushButton(" Key Press")
+        mouse_click_btn = QPushButton(" Mouse Click")
         
         key_press_btn.setCheckable(True)
         mouse_click_btn.setCheckable(True)
         key_press_btn.setChecked(True)
         
-        # Connect action type change handlers
         key_press_btn.toggled.connect(lambda checked, key=gesture_key: self._on_action_type_changed(key, checked))
         
-        # FIX: Use QButtonGroup for proper mutual exclusion instead of complex signal connections.
-        # This prevents the buttons from toggling each other when clicked again.
         action_button_group = QButtonGroup(action_frame)
         action_button_group.addButton(key_press_btn)
         action_button_group.addButton(mouse_click_btn)
@@ -248,39 +285,80 @@ class CustomModeDialog(QDialog):
         
         action_layout.addWidget(key_press_btn)
         action_layout.addWidget(mouse_click_btn)
-        action_frame.setEnabled(False)
         controls_layout.addWidget(action_frame, 2, 1)
         
-        controls_layout.addWidget(QLabel("Key/Button:"), 3, 0)
-        key_display = QLabel("[Space]")
-        key_display.setStyleSheet("""
-            background-color: #000;
-            border: 1px solid #333;
-            border-radius: 4px;
-            padding: 6px 12px;
-            font-family: monospace;
-            font-weight: bold;
+        # --- NEW: Stacked widget for Key vs Mouse selection ---
+        controls_layout.addWidget(QLabel("Action Target:"), 3, 0)
+        action_stack = QStackedWidget()
+        
+        # --- Page 0: Key Combination Builder ---
+        key_combo_widget = QWidget()
+        key_combo_layout = QHBoxLayout(key_combo_widget)
+        key_combo_layout.setContentsMargins(0, 0, 0, 0)
+        key_combo_layout.setSpacing(5)
+
+        key_combos = []
+        for i in range(3): # Max 3 keys
+            combo = QComboBox()
+            combo.addItems(self.all_keys_sorted)
+            combo.setVisible(i == 0)
+            key_combos.append(combo)
+            key_combo_layout.addWidget(combo)
+
+        add_key_btn = QPushButton("Add Key")
+        add_key_btn.setMaximumWidth(80)
+        add_key_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4caf50;
+                color: white;
+                border: 1px solid #45a049;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
         """)
         
-        select_key_btn = QPushButton("Select")
-        select_key_btn.setEnabled(False)
-        select_key_btn.clicked.connect(lambda _, key=gesture_key: self.show_key_selection(key))
+        remove_key_btn = QPushButton("Remove")
+        remove_key_btn.setMaximumWidth(80)
+        remove_key_btn.setVisible(False)
+        remove_key_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                border: 1px solid #da190b;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #da190b;
+            }
+        """)
+
+        key_combo_layout.addWidget(add_key_btn)
+        key_combo_layout.addWidget(remove_key_btn)
+        key_combo_layout.addStretch()
         
-        key_frame = QFrame()
-        key_layout = QHBoxLayout(key_frame)
-        key_layout.setContentsMargins(0, 0, 0, 0)
-        key_layout.addWidget(key_display)
-        key_layout.addWidget(select_key_btn)
-        key_layout.addStretch()
+        add_key_btn.clicked.connect(lambda _, key=gesture_key: self._add_key_combo(key))
+        remove_key_btn.clicked.connect(lambda _, key=gesture_key: self._remove_key_combo(key))
         
-        controls_layout.addWidget(key_frame, 3, 1)
+        action_stack.addWidget(key_combo_widget)
+
+        # --- Page 1: Mouse Button Selector ---
+        mouse_button_combo = QComboBox()
+        mouse_button_combo.addItems(self.valid_mouse_buttons)
+        action_stack.addWidget(mouse_button_combo)
+        
+        controls_layout.addWidget(action_stack, 3, 1)
         
         controls_layout.addWidget(QLabel("Cooldown (s):"), 4, 0)
         cooldown_spin = QDoubleSpinBox()
         cooldown_spin.setRange(0.1, 5.0)
         cooldown_spin.setSingleStep(0.1)
         cooldown_spin.setValue(0.8)
-        cooldown_spin.setEnabled(False)
         controls_layout.addWidget(cooldown_spin, 4, 1)
         
         layout.addLayout(controls_layout)
@@ -290,14 +368,42 @@ class CustomModeDialog(QDialog):
             'description': desc_edit,
             'key_press_btn': key_press_btn,
             'mouse_click_btn': mouse_click_btn,
-            'key_display': key_display,
-            'select_key_btn': select_key_btn,
+            'action_stack': action_stack,
+            'key_combos': key_combos,
+            'add_key_btn': add_key_btn,
+            'remove_key_btn': remove_key_btn,
+            'mouse_button_combo': mouse_button_combo,
             'cooldown': cooldown_spin,
-            'current_key': 'space'
         }
+        
+        # Disable all controls by default until 'Enable' is checked
+        self.toggle_gesture_controls(gesture_key, False)
         
         return card
 
+    def _add_key_combo(self, gesture_key):
+        widgets = self.gesture_widgets[gesture_key]
+        key_combos = widgets['key_combos']
+        
+        for i, combo in enumerate(key_combos):
+            if not combo.isVisible():
+                combo.setVisible(True)
+                widgets['remove_key_btn'].setVisible(True)
+                if i == len(key_combos) - 1:
+                    widgets['add_key_btn'].setVisible(False)
+                return
+
+    def _remove_key_combo(self, gesture_key):
+        widgets = self.gesture_widgets[gesture_key]
+        key_combos = widgets['key_combos']
+        
+        for i in range(len(key_combos) - 1, -1, -1):
+            if key_combos[i].isVisible():
+                key_combos[i].setVisible(False)
+                widgets['add_key_btn'].setVisible(True)
+                if i == 1:
+                    widgets['remove_key_btn'].setVisible(False)
+                return
     
     
 
@@ -305,100 +411,66 @@ class CustomModeDialog(QDialog):
         widgets = self.gesture_widgets[gesture_key]
         widgets['description'].setEnabled(enabled)
         widgets['key_press_btn'].parent().setEnabled(enabled)
-        widgets['select_key_btn'].setEnabled(enabled)
         widgets['cooldown'].setEnabled(enabled)
+        widgets['action_stack'].setEnabled(enabled)
+        widgets['add_key_btn'].setEnabled(enabled)
+        widgets['remove_key_btn'].setEnabled(enabled)
 
-    def show_key_selection(self, gesture_key):
-        """Show appropriate selection dialog based on action type."""
-        widgets = self.gesture_widgets[gesture_key]
-        current_key = widgets['current_key']
-
-        # Determine options based on action type
-        if widgets['key_press_btn'].isChecked():
-            options_list = self.valid_keyboard_keys
-            dialog_title = "Select Keyboard Key"
-        else:
-            options_list = self.valid_mouse_buttons
-            dialog_title = "Select Mouse Button"
-        
-        # Ensure current key is in the valid list
-        if current_key not in options_list:
-            current_key = options_list[0]
-        
-        key, ok = QInputDialog.getItem(
-            self, dialog_title, 
-            "Choose an option:", 
-            options_list,
-            options_list.index(current_key),
-            False
-        )
-        
-        if ok and key:
-            self.update_key_display(gesture_key, key)
-
-    def update_key_display(self, gesture_key, key_text):
-        """Update the key display label."""
-        widgets = self.gesture_widgets[gesture_key]
-        widgets['current_key'] = key_text
-        
-        # Format display text
-        if '+' in key_text:
-            formatted_key = f"[{key_text.upper()}]"
-        else:
-            formatted_key = f"[{key_text.capitalize()}]"
-        
-        widgets['key_display'].setText(formatted_key)
-
-    def get_gesture_display_name(self, gesture_key):
-        gesture_names = {
-            'right_index_bent': '👉 Right Hand: Bend INDEX finger down',
-            'left_index_bent': '👈 Left Hand: Bend INDEX finger down', 
-            'right_index_middle_bent': '👉 Right Hand: Bend INDEX + MIDDLE fingers down',
-            'left_index_middle_bent': '👈 Left Hand: Bend INDEX + MIDDLE fingers down',
-            'fist_gesture': '✊ Either Hand: Make a FIST (close all fingers)',
-        }
-        return gesture_names.get(gesture_key, gesture_key.replace('_', ' ').title())
 
     def load_existing_mode(self):
         """Load existing mode data into the dialog."""
         if not self.mode_data:
             return
             
+        if hasattr(self, 'mode_name_edit'):
+            self.mode_name_edit.setText(self.mode_data.name)
+            if self.edit_mode:
+                self.mode_name_edit.setEnabled(False)
+            
         for gesture_key, gesture_data in self.mode_data.gestures.items():
             if gesture_key in self.gesture_widgets:
                 widgets = self.gesture_widgets[gesture_key]
                 
-                # Enable the gesture
                 widgets['enable'].setChecked(True)
-                self.toggle_gesture_controls(gesture_key, True)
-                
-                # Set description
                 widgets['description'].setText(gesture_data.description)
+                widgets['cooldown'].setValue(gesture_data.cooldown)
                 
-                # Set action type and key/button
                 if gesture_data.action == 'key_press':
                     widgets['key_press_btn'].setChecked(True)
-                    widgets['mouse_click_btn'].setChecked(False)
-                    widgets['current_key'] = gesture_data.key or 'space'
-                else:
-                    widgets['key_press_btn'].setChecked(False)
+                    widgets['action_stack'].setCurrentIndex(0)
+                    
+                    keys = gesture_data.key.split('+')
+                    key_combos = widgets['key_combos']
+                    
+                    for i, combo in enumerate(key_combos):
+                        if i < len(keys):
+                            combo.setCurrentText(keys[i])
+                            combo.setVisible(True)
+                        else:
+                            combo.setVisible(False)
+                    
+                    num_keys = len(keys)
+                    widgets['add_key_btn'].setVisible(num_keys < 3)
+                    widgets['remove_key_btn'].setVisible(num_keys > 1)
+
+                elif gesture_data.action == 'mouse_click':
                     widgets['mouse_click_btn'].setChecked(True)
-                    widgets['current_key'] = gesture_data.button or 'left'
-                
-                # Update display
-                self.update_key_display(gesture_key, widgets['current_key'])
-                
-                # Set cooldown
-                widgets['cooldown'].setValue(gesture_data.cooldown)
+                    widgets['action_stack'].setCurrentIndex(1)
+                    widgets['mouse_button_combo'].setCurrentText(gesture_data.button)
 
     def save_mode(self):
         """Save the custom mode."""
         if self.edit_mode and self.mode_data:
             mode_name = self.mode_data.name
+            mode_key = self.edit_mode
         else:
             mode_name = self.mode_name_edit.text().strip()
             if not mode_name:
-                QMessageBox.warning(self, "Invalid Name", "Please enter a mode name!")
+                QMessageBox.warning(self, "Input Error", "Mode name cannot be empty.")
+                return
+            mode_key = f"{mode_name.lower().replace(' ', '_')}_mode"
+            if hasattr(config_manager.app_modes, mode_key) and not self.edit_mode:
+                QMessageBox.warning(self, "Input Error", f"A mode with key '{mode_key}' already exists.")
                 return
         
         gestures = {}
@@ -407,57 +479,46 @@ class CustomModeDialog(QDialog):
         for gesture_key, widgets in self.gesture_widgets.items():
             if widgets['enable'].isChecked():
                 enabled_count += 1
+                description = widgets['description'].text()
+                cooldown = widgets['cooldown'].value()
                 
-                # Determine action and key/button based on selection
-                if widgets['key_press_btn'].isChecked():
-                    action = 'key_press'
-                    key = widgets['current_key']
-                    button = None
-                else:
-                    action = 'mouse_click'
-                    key = None
-                    button = widgets['current_key']
+                action = 'key_press' if widgets['key_press_btn'].isChecked() else 'mouse_click'
+                key = None
+                button = None
                 
-                # Explicitly ensure description is always a string
-                desc_from_widget = widgets['description'].text().strip()
-                if desc_from_widget:
-                    final_description = desc_from_widget
-                else:
-                    final_description = self.get_gesture_display_name(gesture_key)
-                
-                # Ensure final_description is definitely a string
-                assert isinstance(final_description, str), "Description must be a string"
-                
+                if action == 'key_press':
+                    key_parts = []
+                    for combo in widgets['key_combos']:
+                        if combo.isVisible():
+                            key_parts.append(combo.currentText())
+                    key = '+'.join(key_parts) if key_parts else 'space'
+                else: # mouse_click
+                    button = widgets['mouse_button_combo'].currentText()
+
                 gestures[gesture_key] = ApplicationModeGesture(
                     action=action,
                     key=key,
                     button=button,
-                    description=final_description,
-                    cooldown=widgets['cooldown'].value()
+                    description=description,
+                    cooldown=cooldown
                 )
         
         if enabled_count == 0:
-            QMessageBox.warning(self, "No Gestures", "Please enable at least one gesture!")
+            QMessageBox.warning(self, "Input Error", "You must enable and configure at least one gesture.")
             return
         
-        # Create or update mode
         if self.edit_mode and self.mode_data:
-            # Update existing mode
-            self.mode_data.gestures = gestures
+            mode_config = self.mode_data
+            mode_config.name = mode_name
+            mode_config.gestures = gestures
         else:
-            # Create new mode
-            mode_key = mode_name.lower().replace(' ', '_') + '_mode'
-            mode_config = ApplicationModeConfig(
-                name=mode_name,
-                enabled=False,
-                gestures=gestures
-            )
+            mode_config = ApplicationModeConfig(name=mode_name, gestures=gestures)
             setattr(config_manager.app_modes, mode_key, mode_config)
         
         config_manager.save_config()
         
-        action = "updated" if self.edit_mode else "created"
-        QMessageBox.information(self, "Success", f"Mode '{mode_name}' {action} with {enabled_count} gestures!")
+        action_str = "updated" if self.edit_mode else "created"
+        QMessageBox.information(self, "Success", f"Mode '{mode_name}' {action_str} with {enabled_count} gestures!")
         
         self.accept()
 
@@ -465,7 +526,8 @@ class SettingsDialog(QDialog):
     """A dedicated dialog for all application settings."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚙️ Configuration Settings")
+        self.setWindowTitle("Configuration Settings")
+        self.setWindowIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
         self.setMinimumSize(800, 700)
         self.setModal(True)
         if parent and hasattr(parent, 'styleSheet'):
@@ -484,20 +546,27 @@ class SettingsDialog(QDialog):
         main_layout.addWidget(tabs)
 
         # Create tabs
-        tabs.addTab(self.create_detection_tab(), "🎯 Detection")
-        tabs.addTab(self.create_control_tab(), "🎮 Control System")
-        tabs.addTab(self.create_smart_palm_tab(), "🖐️ Smart Palm")
-        tabs.addTab(self.create_gesture_mapping_tab(), "🗺️ Gesture Mapping")
+        tabs.addTab(self.create_detection_tab(), "Detection")
+        tabs.addTab(self.create_control_tab(), "Control System")
+        tabs.addTab(self.create_smart_palm_tab(), "Smart Palm")
+        
+        # Set tab icons
+        tabs.setTabIcon(0, self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        tabs.setTabIcon(1, self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        tabs.setTabIcon(2, self.style().standardIcon(QStyle.StandardPixmap.SP_DesktopIcon))
 
         # Action Buttons
         button_layout = QHBoxLayout()
-        reset_btn = QPushButton("🔄 Reset to Defaults")
+        reset_btn = QPushButton(" Reset to Defaults")
+        reset_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
         reset_btn.clicked.connect(self.reset_settings)
         
-        self.save_btn = QPushButton("💾 Save & Apply")
+        self.save_btn = QPushButton(" Save & Apply")
+        self.save_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton))
         self.save_btn.clicked.connect(self.accept)
         
-        cancel_btn = QPushButton("❌ Cancel")
+        cancel_btn = QPushButton(" Cancel")
+        cancel_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCancelButton))
         cancel_btn.clicked.connect(self.reject)
 
         button_layout.addWidget(reset_btn)
@@ -657,47 +726,47 @@ class SettingsDialog(QDialog):
         layout.addStretch()
         return tab
 
-    def create_gesture_mapping_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setSpacing(20)
+    # def create_gesture_mapping_tab(self):
+    #     tab = QWidget()
+    #     layout = QVBoxLayout(tab)
+    #     layout.setSpacing(20)
 
-        group = QGroupBox("Gesture Mapping Engine")
-        grid = QGridLayout(group)
+    #     group = QGroupBox("Gesture Mapping Engine")
+    #     grid = QGridLayout(group)
 
-        self.enable_gesture_mapping_cb = QCheckBox("Enable Gesture Mapping System")
-        grid.addWidget(self.enable_gesture_mapping_cb, 0, 0, 1, 2)
+    #     self.enable_gesture_mapping_cb = QCheckBox("Enable Gesture Mapping System")
+    #     grid.addWidget(self.enable_gesture_mapping_cb, 0, 0, 1, 2)
 
-        self.require_simultaneous_cb = QCheckBox("Require Simultaneous Detection for Combos")
-        grid.addWidget(self.require_simultaneous_cb, 1, 0, 1, 2)
+    #     self.require_simultaneous_cb = QCheckBox("Require Simultaneous Detection for Combos")
+    #     grid.addWidget(self.require_simultaneous_cb, 1, 0, 1, 2)
 
-        self.global_cooldown_spin = QDoubleSpinBox()
-        self.global_cooldown_spin.setRange(0.0, 2.0)
-        self.global_cooldown_spin.setSingleStep(0.05)
-        self.global_cooldown_spin.setSuffix(" s")
-        self._add_widget(grid, 2, "Global Cooldown:", self.global_cooldown_spin)
+    #     self.global_cooldown_spin = QDoubleSpinBox()
+    #     self.global_cooldown_spin.setRange(0.0, 2.0)
+    #     self.global_cooldown_spin.setSingleStep(0.05)
+    #     self.global_cooldown_spin.setSuffix(" s")
+    #     self._add_widget(grid, 2, "Global Cooldown:", self.global_cooldown_spin)
 
-        self.gesture_stability_frames_spin = QSpinBox()
-        self.gesture_stability_frames_spin.setRange(1, 20)
-        self.gesture_stability_frames_spin.setSuffix(" frames")
-        self._add_widget(grid, 3, "Gesture Stability Frames:", self.gesture_stability_frames_spin)
-        layout.addWidget(group)
+    #     self.gesture_stability_frames_spin = QSpinBox()
+    #     self.gesture_stability_frames_spin.setRange(1, 20)
+    #     self.gesture_stability_frames_spin.setSuffix(" frames")
+    #     self._add_widget(grid, 3, "Gesture Stability Frames:", self.gesture_stability_frames_spin)
+    #     layout.addWidget(group)
 
-        group_thresh = QGroupBox("Finger Angle Thresholds")
-        grid_thresh = QGridLayout(group_thresh)
-        self.relaxed_thresh_spin = QSpinBox()
-        self.relaxed_thresh_spin.setRange(30, 100)
-        self.relaxed_thresh_spin.setSuffix("°")
-        self._add_widget(grid_thresh, 0, "Relaxed Angle Max:", self.relaxed_thresh_spin)
+    #     group_thresh = QGroupBox("Finger Angle Thresholds")
+    #     grid_thresh = QGridLayout(group_thresh)
+    #     self.relaxed_thresh_spin = QSpinBox()
+    #     self.relaxed_thresh_spin.setRange(30, 100)
+    #     self.relaxed_thresh_spin.setSuffix("°")
+    #     self._add_widget(grid_thresh, 0, "Relaxed Angle Max:", self.relaxed_thresh_spin)
 
-        self.bent_thresh_spin = QSpinBox()
-        self.bent_thresh_spin.setRange(100, 180)
-        self.bent_thresh_spin.setSuffix("°")
-        self._add_widget(grid_thresh, 1, "Bent Angle Min:", self.bent_thresh_spin)
-        layout.addWidget(group_thresh)
+    #     self.bent_thresh_spin = QSpinBox()
+    #     self.bent_thresh_spin.setRange(100, 180)
+    #     self.bent_thresh_spin.setSuffix("°")
+    #     self._add_widget(grid_thresh, 1, "Bent Angle Min:", self.bent_thresh_spin)
+    #     layout.addWidget(group_thresh)
 
-        layout.addStretch()
-        return tab
+    #     layout.addStretch()
+    #     return tab
 
     def load_settings(self):
         """Load all settings from config manager into the UI."""
@@ -730,14 +799,6 @@ class SettingsDialog(QDialog):
         self.periodic_check_spin.setValue(config_manager.smart_palm.periodic_check_interval)
         self.state_debug_cb.setChecked(config_manager.smart_palm.state_transition_debug)
 
-        # Gesture Mapping
-        self.enable_gesture_mapping_cb.setChecked(config_manager.gesture_mapping.enable_gesture_mapping)
-        self.global_cooldown_spin.setValue(config_manager.gesture_mapping.global_cooldown)
-        self.relaxed_thresh_spin.setValue(config_manager.gesture_mapping.relaxed_threshold)
-        self.bent_thresh_spin.setValue(config_manager.gesture_mapping.bent_threshold)
-        self.require_simultaneous_cb.setChecked(config_manager.gesture_mapping.require_simultaneous_detection)
-        self.gesture_stability_frames_spin.setValue(config_manager.gesture_mapping.gesture_stability_frames)
-
     def save_settings(self):
         """Save all settings from UI to config manager."""
         # Detection
@@ -768,14 +829,6 @@ class SettingsDialog(QDialog):
         config_manager.smart_palm.grace_period_duration = self.grace_period_spin.value()
         config_manager.smart_palm.periodic_check_interval = self.periodic_check_spin.value()
         config_manager.smart_palm.state_transition_debug = self.state_debug_cb.isChecked()
-
-        # Gesture Mapping
-        config_manager.gesture_mapping.enable_gesture_mapping = self.enable_gesture_mapping_cb.isChecked()
-        config_manager.gesture_mapping.global_cooldown = self.global_cooldown_spin.value()
-        config_manager.gesture_mapping.relaxed_threshold = self.relaxed_thresh_spin.value()
-        config_manager.gesture_mapping.bent_threshold = self.bent_thresh_spin.value()
-        config_manager.gesture_mapping.require_simultaneous_detection = self.require_simultaneous_cb.isChecked()
-        config_manager.gesture_mapping.gesture_stability_frames = self.gesture_stability_frames_spin.value()
 
         config_manager.save_config()
         QMessageBox.information(self, "Settings Saved", "All settings have been applied and saved successfully!")
@@ -1009,24 +1062,28 @@ class GestureDashboard(QMainWindow):
         return frame
 
     def create_engine_controls(self):
-        group = QGroupBox("🎛️ System Controls")
+        group = QGroupBox("System Controls")
         layout = QGridLayout(group)
         layout.setSpacing(10)
         
-        self.start_btn = QPushButton("▶️ Start Engine")
+        self.start_btn = QPushButton(" Start Engine")
         self.start_btn.setObjectName("StartBtn")
+        self.start_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
         self.start_btn.clicked.connect(self.start_engine)
         
-        self.stop_btn = QPushButton("⏹️ Stop Engine")
+        self.stop_btn = QPushButton(" Stop Engine")
         self.stop_btn.setObjectName("StopBtn")
+        self.stop_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaStop))
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_engine)
         
-        self.pause_btn = QPushButton("⏸️ Pause")
+        self.pause_btn = QPushButton(" Pause")
+        self.pause_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
         self.pause_btn.setEnabled(False)
         self.pause_btn.clicked.connect(self.pause_resume_engine)
         
-        self.settings_btn = QPushButton("⚙️ Settings")
+        self.settings_btn = QPushButton(" Settings")
+        self.settings_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
         self.settings_btn.clicked.connect(self.open_settings_dialog)
 
         self.mode_combo = QComboBox()
@@ -1079,7 +1136,8 @@ class GestureDashboard(QMainWindow):
         scroll_area.setWidgetResizable(True)
         scroll_area.setWidget(self.mode_tags_widget)
         
-        custom_mode_btn = QPushButton("➕ Create Custom Mode")
+        custom_mode_btn = QPushButton(" Create Custom Mode")
+        custom_mode_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
         custom_mode_btn.clicked.connect(self.create_custom_mode)
         
         nav_layout.addWidget(scroll_area)
@@ -1118,9 +1176,20 @@ class GestureDashboard(QMainWindow):
             if mode_key.endswith('_mode') and not mode_key.startswith('_'):
                 mode_obj = getattr(config_manager.app_modes, mode_key, None)
                 if mode_obj and hasattr(mode_obj, 'name'):
-                    icon = "🛠️" if "custom" in mode_key.lower() else {'ppt_mode': '📊', 'media_mode': '🎵', 'browser_mode': '🌐'}.get(mode_key, '⚙️')
+                    icon_map = {
+                        "custom": QStyle.StandardPixmap.SP_CustomBase,
+                        "ppt_mode": QStyle.StandardPixmap.SP_FileDialogInfoView,
+                        "media_mode": QStyle.StandardPixmap.SP_MediaVolume,
+                        "browser_mode": QStyle.StandardPixmap.SP_ComputerIcon
+                    }
+                    icon_pixmap = QStyle.StandardPixmap.SP_ComputerIcon # Default
+                    for key_part, pixmap in icon_map.items():
+                        if key_part in mode_key.lower():
+                            icon_pixmap = pixmap
+                            break
                     
-                    tag_button = QPushButton(f"{icon} {mode_obj.name}")
+                    tag_button = QPushButton(f" {mode_obj.name}")
+                    tag_button.setIcon(self.style().standardIcon(icon_pixmap))
                     tag_button.setObjectName("ModeTag")
                     tag_button.setCheckable(True)
                     tag_button.clicked.connect(lambda _, i=idx: self.mode_content_stack.setCurrentIndex(i))
@@ -1148,7 +1217,8 @@ class GestureDashboard(QMainWindow):
         header_label = QLabel(f"Configure {mode_obj.name}")
         header_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #00ffff;")
         
-        edit_btn = QPushButton("✏️ Edit Mode")
+        edit_btn = QPushButton(" Edit Mode")
+        edit_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileLinkIcon))
         edit_btn.clicked.connect(lambda: self.edit_mode(mode_key))
         
         header_layout.addWidget(header_label)
@@ -1222,9 +1292,11 @@ class GestureDashboard(QMainWindow):
         card.setFrameStyle(QFrame.Shape.StyledPanel)
         card.setStyleSheet("""
             QFrame {
-                background-color: #151515;
-                border: 1px solid #2a2a2a;
-                border-radius: 16px; /* Larger radius for a softer look */
+                background-color: #2d2d30;   
+                border: 1px solid #3e3e42;   
+                border-radius: 8px;         
+                margin: 4px;                 
+                padding: 12px;               
             }
         """)
         card.setMinimumHeight(100) # Increased height for more vertical space
@@ -1251,7 +1323,7 @@ class GestureDashboard(QMainWindow):
         """
 
         # --- 1. Gesture Name Box ---
-        name_text = self.get_gesture_display_name(gesture_key)
+        name_text = get_gesture_display_name(gesture_key)
         name_label = QLabel(name_text)
         name_label.setStyleSheet(element_style + "QLabel { color: #00ffff; font-weight: bold; }")
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1290,17 +1362,6 @@ class GestureDashboard(QMainWindow):
         layout.addWidget(key_label, 2)
 
         return card
-
-    def get_gesture_display_name(self, gesture_key):
-        gesture_names = {
-            'right_index_bent': '👉 Right Index Bent',
-            'left_index_bent': '👈 Left Index Bent', 
-            'right_index_middle_bent': '👉 Right Index+Middle Bent',
-            'left_index_middle_bent': '👈 Left Index+Middle Bent',
-            'fist_gesture': '✊ Fist Gesture',
-        }
-        return gesture_names.get(gesture_key, gesture_key.replace('_', ' ').title())
-
     
 
     def create_custom_mode(self):
@@ -1353,11 +1414,13 @@ class GestureDashboard(QMainWindow):
             from gesture_engine import complete_engine
             if complete_engine.paused:
                 complete_engine.resume()
-                self.pause_btn.setText("⏸️ Pause")
+                self.pause_btn.setText(" Pause")
+                self.pause_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
                 self.status_bar.showMessage("Engine resumed.", 2000)
             else:
                 complete_engine.pause()
-                self.pause_btn.setText("▶️ Resume")
+                self.pause_btn.setText(" Resume")
+                self.pause_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
                 self.status_bar.showMessage("Engine paused.", 2000)
 
     def change_mode(self, mode_text):

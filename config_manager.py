@@ -39,7 +39,7 @@ class ControlSystemConfig:
     
     enable_scroll_control: bool = False
     scroll_sensitivity: int = 6
-    scroll_threshold: float = 0.02
+    scroll_threshold: float = 0.1
     scroll_smoothing: float = 0.6
     scroll_hand_preference: str = 'any'  # 'left', 'right', or 'any'
     
@@ -72,16 +72,20 @@ class GestureMappingConfig:
     # Gesture combination settings
     require_simultaneous_detection: bool = True
     gesture_stability_frames: int = 2
-    
-    # Available keys for mapping
+      # Available keys for mapping (individual keys only - combinations are built dynamically)
     available_keys: list = field(default_factory=lambda: [
+        # Navigation and special keys
         'space', 'enter', 'tab', 'escape', 'backspace', 'delete',
-        'left', 'right', 'up', 'down', 
+        'left', 'right', 'up', 'down', 'pageup', 'pagedown', 'home', 'end', 'insert',
+        # Letters a-z
         'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
         'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
-        '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+        # Numbers 0-9
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+        # Function keys
         'f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9', 'f10', 'f11', 'f12',
-        'ctrl+c', 'ctrl+v', 'ctrl+z', 'ctrl+s', 'alt+tab'
+        # Modifier keys
+        'ctrl', 'alt', 'shift', 'win', 'cmd', 'command', 'option'
     ])
     
     # Gesture definitions
@@ -180,12 +184,28 @@ class ConfigurationManager:
                 cooldown=0.6
             ),
             'fist_gesture': GestureDefinition(
-                name='Open Palm to Closed Fist',
-                description='Transition from open palm to closed fist',
-                detection_type='mediapipe_transition',
+                name='Closed Fist',
+                description='closed fist',
+                detection_type='mediapipe_static',
                 hand='any',
                 mapped_key='space',
                 cooldown=1.0
+            ),
+            'open_palm_gesture': GestureDefinition(
+            name='Open Palm',
+            description='Open palm (stop/cancel gesture)',
+            detection_type='mediapipe_static',
+            hand='any',
+            mapped_key='escape',
+            cooldown=1.0
+            ),
+            'iloveyou_gesture': GestureDefinition(
+                name='I Love You Sign',
+                description='ASL I Love You sign (thumb, index, pinky extended)',
+                detection_type='mediapipe_static',
+                hand='any',
+                mapped_key='ctrl+s',
+                cooldown=1.5
             )
         }
         self.gesture_mapping.gesture_definitions = default_gestures
@@ -392,6 +412,15 @@ class ConfigurationManager:
             'periodic_check_interval': self.smart_palm.periodic_check_interval,
             'state_transition_debug': self.smart_palm.state_transition_debug,
         })
+                # FIXED: Add missing scroll state initialization
+        params['scroll_state'] = {
+            'is_scrolling': False,
+            'start_pos': None,
+            'locked_direction': None,
+            'active_hand': None,
+            'last_scroll_time': 0
+        }
+        
         
         # Control system parameters
         params.update(asdict(self.control_system))
@@ -404,8 +433,33 @@ class ConfigurationManager:
         params['previous_frame_processed_regions'] = []
         params['gesture_history'] = {}
         
-        # Convert gesture mapping to legacy format
-        params['gesture_mapping'] = asdict(self.gesture_mapping)
+        # Convert gesture mapping to legacy format - manual serialization
+        gesture_mapping_dict = {
+            'enable_gesture_mapping': self.gesture_mapping.enable_gesture_mapping,
+            'global_cooldown': self.gesture_mapping.global_cooldown,
+            'last_any_gesture_time': self.gesture_mapping.last_any_gesture_time,
+            'relaxed_threshold': self.gesture_mapping.relaxed_threshold,
+            'bent_threshold': self.gesture_mapping.bent_threshold,
+            'require_simultaneous_detection': self.gesture_mapping.require_simultaneous_detection,
+            'gesture_stability_frames': self.gesture_mapping.gesture_stability_frames,
+            'available_keys': list(self.gesture_mapping.available_keys),
+            'gesture_definitions': {}
+        }
+        
+        # Convert gesture definitions manually
+        for key, gesture_def in self.gesture_mapping.gesture_definitions.items():
+            gesture_mapping_dict['gesture_definitions'][key] = {
+                'name': gesture_def.name,
+                'description': gesture_def.description,
+                'detection_type': gesture_def.detection_type,
+                'hand': gesture_def.hand,
+                'enabled': gesture_def.enabled,
+                'mapped_key': gesture_def.mapped_key,
+                'cooldown': gesture_def.cooldown,
+                'last_triggered': gesture_def.last_triggered
+            }
+        
+        params['gesture_mapping'] = gesture_mapping_dict
         
         # --- FIXED APP MODES CONVERSION - Manual serialization ---
         app_modes_dict = {
@@ -460,14 +514,29 @@ class ConfigurationManager:
         if not 0.0 <= self.detection.nms_threshold <= 1.0:
             errors.append("NMS threshold must be between 0.0 and 1.0")
         
-        # Validate control system
         if self.control_system.screen_width <= 0 or self.control_system.screen_height <= 0:
             errors.append("Screen dimensions must be positive")
         
         # Validate gesture mappings
         for gesture_id, gesture_def in self.gesture_mapping.gesture_definitions.items():
-            if gesture_def.mapped_key not in self.gesture_mapping.available_keys:
-                warnings.append(f"Gesture '{gesture_id}' mapped to unknown key '{gesture_def.mapped_key}'")
+            keys_to_check = [k.strip() for k in gesture_def.mapped_key.split('+')]
+            for key in keys_to_check:
+                if key not in self.gesture_mapping.available_keys:
+                    warnings.append(f"Gesture '{gesture_id}' uses potentially unknown key '{key}' in mapping '{gesture_def.mapped_key}'")
+                    break # Only warn once per gesture definition
+        
+        # Validate app mode gesture mappings
+        for mode_key in dir(self.app_modes):
+            if mode_key.endswith('_mode') and not mode_key.startswith('_'):
+                mode_config = getattr(self.app_modes, mode_key)
+                if isinstance(mode_config, ApplicationModeConfig):
+                    for gesture_key, gesture_data in mode_config.gestures.items():
+                        if gesture_data.action == 'key_press' and gesture_data.key:
+                            keys_to_check = [k.strip() for k in gesture_data.key.split('+')]
+                            for key in keys_to_check:
+                                if key not in self.gesture_mapping.available_keys:
+                                    warnings.append(f"Mode '{mode_config.name}', gesture '{gesture_key}' uses potentially unknown key '{key}' in mapping '{gesture_data.key}'")
+                                    break # Only warn once per gesture
         
         return {'errors': errors, 'warnings': warnings}
 

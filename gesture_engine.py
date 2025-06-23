@@ -10,7 +10,7 @@ from config_manager import config_manager
 from event_system import event_bus, GestureEvent
 from detection_models import model_manager
 # BUG FIX 1: Import the missing 'process_finger_detection' function
-from gesture_processor import gesture_processor, process_finger_detection
+from gesture_processor import process_finger_detection
 from hand_landmark import *
 from application_modes import ApplicationModeManager
 import pyautogui
@@ -22,7 +22,7 @@ class CompleteGestureEngine:
         self.config_manager = config_manager
         self.event_bus = event_bus
         self.model_manager = model_manager
-        self.processor = gesture_processor
+        
         
         self.running = False
         self.paused = False

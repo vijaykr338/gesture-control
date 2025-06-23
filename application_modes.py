@@ -3,7 +3,7 @@ import pyautogui
 import numpy as np
 import math
 from typing import Dict, Any
-from config_manager import ApplicationModesConfig, ApplicationModeConfig, ApplicationModeGesture, config_manager
+from config_manager import ApplicationModeGesture, config_manager
 
 class ApplicationModeManager:
     """Manages application-specific gesture modes and actions using dataclass objects."""
@@ -48,9 +48,14 @@ class ApplicationModeManager:
                 detected_gestures.append(f"{hand_type}_index_middle_bent")
         
         # Check for MediaPipe static gestures
+    #ADD STATIC GESTURE MAPPINGS
         if hasattr(region, 'gesture_name'):
             if region.gesture_name == "Closed_Fist":
                 detected_gestures.append('fist_gesture')
+            elif region.gesture_name == "Open_Palm":
+                detected_gestures.append('open_palm_gesture')
+            elif region.gesture_name == "ILoveYou":
+                detected_gestures.append('iloveyou_gesture')
             # Add more MediaPipe gesture mappings as needed
             
         # Execute gestures that exist in the current mode
@@ -125,8 +130,14 @@ class ApplicationModeManager:
         try:
             action = gesture_config.action
             if action == 'key_press' and gesture_config.key:
-                pyautogui.press(gesture_config.key)
-                print(f"🎯 {gesture_config.description}: {gesture_config.key.upper()}")
+                # NEW: Handle key combinations
+                if '+' in gesture_config.key:
+                    keys_to_press = [k.strip() for k in gesture_config.key.split('+')]
+                    pyautogui.hotkey(*keys_to_press)
+                    print(f"🎯 {gesture_config.description}: Hotkey {gesture_config.key.upper()}")
+                else:
+                    pyautogui.press(gesture_config.key)
+                    print(f"🎯 {gesture_config.description}: Key Press {gesture_config.key.upper()}")
             elif action == 'mouse_click' and gesture_config.button:
                 # Validate mouse button before clicking
                 valid_buttons = ('left', 'middle', 'right', 'primary', 'secondary')
@@ -173,7 +184,7 @@ class ApplicationModeManager:
             print(f"Error in cursor control: {e}")
 
     def handle_scroll_control(self, region, force_enable=False):
-        """Your original scroll control logic from the notebook."""
+        """FIXED: Scroll control logic with proper gesture detection."""
         if not force_enable and not self.params.get('enable_scroll_control', False):
             return
         if not hasattr(region, 'landmarks') or len(region.landmarks) < 13:
@@ -182,46 +193,88 @@ class ApplicationModeManager:
         try:
             index_tip = region.landmarks[8]
             middle_tip = region.landmarks[12]
+            
+            # FIXED: Calculate distance properly for scroll gesture detection
             finger_distance = math.sqrt((index_tip[0] - middle_tip[0])**2 + (index_tip[1] - middle_tip[1])**2)
             current_hand = "right" if region.handedness > 0.5 else "left"
             
-            if self.params['scroll_hand_preference'] != 'any' and current_hand != self.params['scroll_hand_preference']:
+            # Check hand preference
+            scroll_hand_pref = self.params.get('scroll_hand_preference', 'any')
+            if scroll_hand_pref != 'any' and current_hand != scroll_hand_pref:
                 return
             
+            # FIXED: Initialize scroll state properly
             if 'scroll_state' not in self.params:
-                self.params['scroll_state'] = {'is_scrolling': False, 'start_pos': None, 'locked_direction': None, 'active_hand': None}
+                self.params['scroll_state'] = {
+                    'is_scrolling': False, 
+                    'start_pos': None, 
+                    'locked_direction': None, 
+                    'active_hand': None,
+                    'last_scroll_time': 0
+                }
             
             scroll_state = self.params['scroll_state']
             center_y = (index_tip[1] + middle_tip[1]) / 2
+            current_time = time.time()
             
-            # Check if gesture is active (fingers close)
-            if finger_distance < self.params.get('scroll_threshold', 0.02):
+            # FIXED: Use proper scroll threshold (default to 0.02 if not set)
+            scroll_threshold = self.params.get('scroll_threshold', 0.04)
+            
+            print(f"[DEBUG] Hand: {current_hand}, Distance: {finger_distance:.4f}, Threshold: {scroll_threshold:.4f}")
+            
+            # Check if scroll gesture is active (fingers close together)
+            if finger_distance < scroll_threshold:
                 if not scroll_state['is_scrolling']:
-                    scroll_state.update({'is_scrolling': True, 'start_pos': center_y, 'active_hand': current_hand})
-                    pref_text = f"(Pref: {self.params['scroll_hand_preference'].upper()})" if self.params['scroll_hand_preference'] != 'any' else "(Any hand allowed)"
-                    print(f"🔒 {current_hand.upper()} SCROLL START {pref_text}")
+                    # Start scrolling
+                    scroll_state.update({
+                        'is_scrolling': True, 
+                        'start_pos': center_y, 
+                        'active_hand': current_hand,
+                        'locked_direction': None
+                    })
+                    print(f"🔒 {current_hand.upper()} SCROLL START (threshold: {scroll_threshold:.3f})")
                     return
                 
+                # Continue scrolling only with the same hand that started
                 if scroll_state['active_hand'] != current_hand:
                     return
                 
+                # Calculate movement from start position
                 delta_from_start = center_y - scroll_state['start_pos']
                 
+                # Lock direction after sufficient movement
                 if scroll_state['locked_direction'] is None and abs(delta_from_start) > 0.03:
                     scroll_state['locked_direction'] = "down" if delta_from_start > 0 else "up"
-                    print(f"🎯 {current_hand.upper()} DIRECTION: {scroll_state['locked_direction'].upper()}")
+                    print(f"🎯 {current_hand.upper()} DIRECTION LOCKED: {scroll_state['locked_direction'].upper()}")
                 
+                # Perform scrolling if direction is locked
                 if scroll_state['locked_direction'] is not None:
                     current_direction = "down" if delta_from_start > 0 else "up"
+                    
+                    # Only scroll in the locked direction
                     if current_direction == scroll_state['locked_direction']:
-                        scroll_amount = int(-delta_from_start * self.params['scroll_sensitivity'] * 80)
-                        if abs(scroll_amount) > 3:
-                            pyautogui.scroll(scroll_amount)
-                            direction_arrow = "↑" if scroll_amount > 0 else "↓"
-                            print(f"📜 {current_hand.upper()} SCROLL {direction_arrow} ({scroll_amount})")
+                        # FIXED: Add scroll throttling to prevent excessive scrolling
+                        if current_time - scroll_state['last_scroll_time'] > 0.1:  # Limit to 10 scrolls per second
+                            scroll_sensitivity = self.params.get('scroll_sensitivity', 6)
+                            scroll_amount = int(-delta_from_start * scroll_sensitivity * 80)
+                            
+                            if abs(scroll_amount) > 2:  # Minimum scroll threshold
+                                pyautogui.scroll(scroll_amount)
+                                scroll_state['last_scroll_time'] = current_time
+                                direction_arrow = "↑" if scroll_amount > 0 else "↓"
+                                print(f"📜 {current_hand.upper()} SCROLL {direction_arrow} (amount: {scroll_amount})")
             else:
+                # End scrolling when fingers move apart
                 if scroll_state['is_scrolling']:
                     print(f"🔓 {scroll_state['active_hand'].upper()} SCROLL END")
-                    scroll_state.update({'is_scrolling': False, 'start_pos': None, 'locked_direction': None, 'active_hand': None})
+                    scroll_state.update({
+                        'is_scrolling': False, 
+                        'start_pos': None, 
+                        'locked_direction': None, 
+                        'active_hand': None
+                    })
+                    
         except Exception as e:
-            print(f"Error in single-hand scroll: {e}")
+            print(f"❌ Error in scroll control: {e}")
+            import traceback
+            traceback.print_exc()
