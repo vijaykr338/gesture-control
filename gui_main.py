@@ -697,6 +697,33 @@ class SettingsDialog(QDialog):
         self._add_widget(grid_key, 1, "Key Press Cooldown:", self.key_cooldown_spin)
         layout.addWidget(group_key)
 
+                # NEW: Game Control Section
+        group_game = QGroupBox("Game Control (Racing)")
+        grid_game = QGridLayout(group_game)
+        
+        self.enable_game_cb = QCheckBox("Enable Game Control Mode")
+        grid_game.addWidget(self.enable_game_cb, 0, 0, 1, 2)
+
+        self.game_control_type_combo = QComboBox()
+        self.game_control_type_combo.addItems(['keyboard', 'directinput'])
+        self._add_widget(grid_game, 1, "Input Method:", self.game_control_type_combo)
+
+        self.steering_sensitivity_spin = QDoubleSpinBox()
+        self.steering_sensitivity_spin.setRange(0.1, 3.0)
+        self.steering_sensitivity_spin.setSingleStep(0.1)
+        self._add_widget(grid_game, 2, "Steering Sensitivity:", self.steering_sensitivity_spin)
+
+        self.steering_deadzone_spin = QDoubleSpinBox()
+        self.steering_deadzone_spin.setRange(0.0, 0.3)
+        self.steering_deadzone_spin.setSingleStep(0.01)
+        self._add_widget(grid_game, 3, "Steering Deadzone:", self.steering_deadzone_spin)
+
+        self.open_palm_threshold_spin = QDoubleSpinBox()
+        self.open_palm_threshold_spin.setRange(0.3, 1.0)
+        self.open_palm_threshold_spin.setSingleStep(0.05)
+        self._add_widget(grid_game, 4, "Open Palm Threshold:", self.open_palm_threshold_spin)
+        
+        layout.addWidget(group_game)
         layout.addStretch()
         return tab
 
@@ -799,6 +826,13 @@ class SettingsDialog(QDialog):
         self.periodic_check_spin.setValue(config_manager.smart_palm.periodic_check_interval)
         self.state_debug_cb.setChecked(config_manager.smart_palm.state_transition_debug)
 
+        # Game Mode 
+        self.enable_game_cb.setChecked(config_manager.control_system.enable_game_control)
+        self.game_control_type_combo.setCurrentText(config_manager.control_system.game_control_type)
+        self.steering_sensitivity_spin.setValue(config_manager.control_system.steering_sensitivity)
+        self.steering_deadzone_spin.setValue(config_manager.control_system.steering_deadzone)
+        self.open_palm_threshold_spin.setValue(config_manager.control_system.open_palm_threshold)
+
     def save_settings(self):
         """Save all settings from UI to config manager."""
         # Detection
@@ -830,8 +864,16 @@ class SettingsDialog(QDialog):
         config_manager.smart_palm.periodic_check_interval = self.periodic_check_spin.value()
         config_manager.smart_palm.state_transition_debug = self.state_debug_cb.isChecked()
 
+ # NEW: Game Control Settings
+        config_manager.control_system.enable_game_control = self.enable_game_cb.isChecked()
+        config_manager.control_system.game_control_type = self.game_control_type_combo.currentText()
+        config_manager.control_system.steering_sensitivity = self.steering_sensitivity_spin.value()
+        config_manager.control_system.steering_deadzone = self.steering_deadzone_spin.value()
+        config_manager.control_system.open_palm_threshold = self.open_palm_threshold_spin.value()
+        
         config_manager.save_config()
         QMessageBox.information(self, "Settings Saved", "All settings have been applied and saved successfully!")
+
 
     def reset_settings(self):
         reply = QMessageBox.question(self, "Reset Settings", 
@@ -852,6 +894,15 @@ class SettingsDialog(QDialog):
     def accept(self):
         self.save_settings()
         super().accept()
+
+class NoArrowKeyComboBox(QComboBox):
+    """QComboBox that ignores arrow key events for mode switching."""
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down):
+            # Ignore arrow keys to prevent accidental mode switching
+            event.ignore()
+            return
+        super().keyPressEvent(event)
 
 class GestureDashboard(QMainWindow):
     """
@@ -1086,7 +1137,7 @@ class GestureDashboard(QMainWindow):
         self.settings_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
         self.settings_btn.clicked.connect(self.open_settings_dialog)
 
-        self.mode_combo = QComboBox()
+        self.mode_combo = NoArrowKeyComboBox()
         self.update_mode_combo()
         self.mode_combo.currentTextChanged.connect(self.change_mode)
         
@@ -1295,31 +1346,34 @@ class GestureDashboard(QMainWindow):
                 background-color: #2d2d30;   
                 border: 1px solid #3e3e42;   
                 border-radius: 8px;         
-                margin: 4px;                 
-                padding: 12px;               
+                margin: 4px;                
+                padding: 18px 8px;
+                min-height: 60px;
+                max-height: 120px; /* Prevent card from growing too tall */
             }
         """)
-        card.setMinimumHeight(100) # Increased height for more vertical space
+        # Remove setMinimumHeight, let max-height control it
 
-        # Main layout with increased spacing and margins
+        # Main layout with reduced spacing and margins
         layout = QHBoxLayout(card)
-        layout.setContentsMargins(24, 24, 24, 24) # Generous 24px padding
-        layout.setSpacing(16) # 16px space between elements
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
 
         # --- Base Style for the inner text boxes ---
         element_style = """
-            QLabel {{
+            QLabel {
                 background-color: #242424;
                 border: 1px solid #3c3c3c;
                 border-radius: 8px;
-                font-size: 14px;
+                font-size: 12px;
                 font-weight: 500;
-                padding: 8px 16px; /* 8px vertical, 16px horizontal padding */
-                min-height: 32px;
-            }}
-            QLabel:hover {{
+                padding: 6px 12px;
+                min-height: 20px;
+                max-width: 220px; /* Prevent text from overflowing horizontally */
+            }
+            QLabel:hover {
                 border-color: #00ffff;
-            }}
+            }
         """
 
         # --- 1. Gesture Name Box ---
@@ -1327,6 +1381,9 @@ class GestureDashboard(QMainWindow):
         name_label = QLabel(name_text)
         name_label.setStyleSheet(element_style + "QLabel { color: #00ffff; font-weight: bold; }")
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        name_label.setWordWrap(True)
+        name_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        name_label.setMaximumWidth(220)
 
         # --- Handle Data ---
         if hasattr(gesture_data, 'description'):
@@ -1340,6 +1397,9 @@ class GestureDashboard(QMainWindow):
         desc_label = QLabel(desc_text)
         desc_label.setStyleSheet(element_style + "QLabel { color: #dddddd; }")
         desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc_label.setWordWrap(True)
+        desc_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        desc_label.setMaximumWidth(220)
 
         # --- 3. Key Binding Badge (more prominent) ---
         formatted_key = f"[{key_val.title()}]" if key_val else "[None]"
@@ -1349,16 +1409,18 @@ class GestureDashboard(QMainWindow):
                 color: #00ffff; 
                 font-family: 'Consolas', monospace; 
                 font-weight: bold;
-                padding: 12px 20px; /* Increased padding to make it stand out */
+                padding: 8px 16px;
             }
         """)
         key_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        key_label.setWordWrap(False)
+        key_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        key_label.setMaximumWidth(120)
 
         # --- Add Widgets to Layout ---
-        # The separator is removed for a cleaner look
         layout.addWidget(name_label, 3)
         layout.addWidget(desc_label, 5)
-        layout.addStretch(1) # Flexible space
+        layout.addStretch(1)
         layout.addWidget(key_label, 2)
 
         return card
@@ -1424,19 +1486,31 @@ class GestureDashboard(QMainWindow):
                 self.status_bar.showMessage("Engine paused.", 2000)
 
     def change_mode(self, mode_text):
-        from gesture_engine import complete_engine
+        """Change application mode"""
+        print(f"🎮 GUI changing mode to: {mode_text}")
         
-        mode_key = "disabled"
-        for key in dir(config_manager.app_modes):
-            if key.endswith('_mode') and not key.startswith('_'):
-                mode_obj = getattr(config_manager.app_modes, key, None)
-                if mode_obj and hasattr(mode_obj, 'name') and mode_obj.name == mode_text:
-                    mode_key = key
-                    break
+        if mode_text == "Disabled":
+            mode_key = 'disabled'
+        else:
+            # Find the mode key for the display name
+            mode_key = None
+            for attr_name in dir(config_manager.app_modes):
+                if attr_name.endswith('_mode') and not attr_name.startswith('_'):
+                    mode_obj = getattr(config_manager.app_modes, attr_name)
+                    if hasattr(mode_obj, 'name') and mode_obj.name == mode_text:
+                        mode_key = attr_name
+                        break
         
-        if hasattr(complete_engine, 'switch_mode'):
-            complete_engine.switch_mode(mode_key)
-            self.status_bar.showMessage(f"Switched to {mode_text}", 2000)
+        if mode_key:
+            print(f"   Mapped to mode key: {mode_key}")
+            # Make sure we're calling the engine's switch_mode method
+            if hasattr(self, 'worker') and self.worker and hasattr(self.worker, 'engine'):
+                success = self.worker.engine.switch_mode(mode_key)
+                print(f"   Engine mode switch result: {success}")
+            else:
+                print("   ❌ No engine worker available")
+        else:
+            print(f"   ❌ Could not find mode key for: {mode_text}")
 
     def update_video_display(self, rgb_frame):
         if rgb_frame is not None:

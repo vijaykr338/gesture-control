@@ -14,6 +14,7 @@ from gesture_processor import process_finger_detection
 from hand_landmark import *
 from application_modes import ApplicationModeManager
 import pyautogui
+from game_controller import get_game_controller
 
 class CompleteGestureEngine:
     """Complete gesture detection engine with full visual rendering like your notebook"""
@@ -77,7 +78,7 @@ class CompleteGestureEngine:
         self.cap = None
         for camera_id in [0, 1, -1]:  # Try different camera indices
             try:
-                test_cap = cv2.VideoCapture(camera_id)
+                test_cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
                 if test_cap.isOpened():
                     # Test if we can actually read frames
                     ret, test_frame = test_cap.read()
@@ -216,9 +217,11 @@ class CompleteGestureEngine:
             
             # Render results with COMPLETE visual display exactly like notebook
             self._render_results_complete(original_frame, processed_regions, frame_w, frame_h)
+            # NEW: Render game controller overlay if active
+            self._render_game_controller_overlay(original_frame)
             
             # Display ALL status information exactly like notebook
-            self._render_complete_status_info(original_frame, processed_regions, need_palm_detection)
+            #self._render_complete_status_info(original_frame, processed_regions, need_palm_detection)
             
             # Update previous frame regions exactly like notebook
             self.params['previous_frame_processed_regions'] = list(processed_regions)
@@ -432,11 +435,19 @@ class CompleteGestureEngine:
             self.params['last_pressed_hand'] = None
     
     def _render_results_complete(self, frame, processed_regions, frame_w, frame_h):
-        """Render results with COMPLETE visual display exactly like your notebook"""
+        """Render bounding boxes, landmarks, show gesture name, user-friendly gesture, and the actual action performed in the current mode as an overlay, plus FPS overlay."""
         if not processed_regions:
             return
         
         input_size = self.params['input_size']
+        current_mode = None
+        mode_action_map = None
+        # Try to get current mode and gesture-action mapping
+        if hasattr(self, 'app_modes') and hasattr(self.app_modes, 'current_mode'):
+            current_mode = getattr(self.app_modes, 'current_mode', None)
+            mode_config = getattr(self.app_modes, current_mode, None)
+            if mode_config and hasattr(mode_config, 'gestures'):
+                mode_action_map = mode_config.gestures
         
         for region in processed_regions:
             if not hasattr(region, 'rect_points'):
@@ -449,160 +460,106 @@ class CompleteGestureEngine:
                 scaled_pty = int(pty * frame_h / input_size)
                 scaled_points.append((scaled_ptx, scaled_pty))
             
-            # Draw bounding rectangle
+            # Draw bounding rectangle (keep)
             points_array = np.array(scaled_points, np.int32)
             cv2.polylines(frame, [points_array], True, (0, 255, 0), 2)
             
-            # Draw confidence score
-            cv2.putText(frame, f"{region.pd_score:.2f}", 
-                       (scaled_points[0][0], scaled_points[0][1] - 10),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            
-            # Render landmarks with COMPLETE detail exactly like your notebook
+            # Draw landmarks (keep)
             if self.params['show_landmarks'] and hasattr(region, 'landmarks'):
                 original_rp_backup = region.rect_points
                 region.rect_points = scaled_points
                 lm_render(frame, region)
                 region.rect_points = original_rp_backup
-                
-                # Display COMPLETE gesture info exactly like your notebook
-                self._render_complete_gesture_info(frame, region, scaled_points)
-    
-    def _render_complete_gesture_info(self, frame, region, scaled_points):
-        """Render COMPLETE gesture information exactly like your notebook"""
-        if not (hasattr(region, 'gesture_type') and hasattr(region, 'hand_type')):
+            
+            # Show gesture name and user-friendly gesture below the bounding box
+            y_text = max(pt[1] for pt in scaled_points) + 25
+            x_text = min(pt[0] for pt in scaled_points)
+            gesture_name = getattr(region, 'gesture_name', None)
+            gesture_type = getattr(region, 'gesture_type', None)
+            # Map gesture_type to user-friendly action
+            user_friendly_gesture = None
+            if gesture_type == 'index_bent':
+                user_friendly_gesture = 'Bend INDEX finger'
+            elif gesture_type == 'index_middle_bent':
+                user_friendly_gesture = 'Bend INDEX + MIDDLE fingers'
+            elif gesture_type == 'fist':
+                user_friendly_gesture = 'Make a FIST'
+            elif gesture_type == 'open_palm':
+                user_friendly_gesture = 'Show OPEN PALM'
+            elif gesture_type == 'iloveyou':
+                user_friendly_gesture = 'I LOVE YOU sign'
+            # Add more mappings as needed
+            else:
+                user_friendly_gesture = gesture_type if gesture_type else ''
+            gesture_text = f"Gesture: {gesture_name if gesture_name else 'No Gesture'}"
+            cv2.putText(frame, gesture_text, (x_text, y_text), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            if user_friendly_gesture:
+                cv2.putText(frame, f"Detected: {user_friendly_gesture}", (x_text, y_text + 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 200, 0), 2)
+            # Show mode-specific action as overlay (actual action, not gesture name)
+            mode_action = None
+            if mode_action_map:
+                # Try to find the action for this gesture in the current mode
+                # Try both gesture_name and gesture_type as keys
+                if gesture_name and gesture_name in mode_action_map:
+                    mode_action = getattr(mode_action_map[gesture_name], 'action', None)
+                elif gesture_type and gesture_type in mode_action_map:
+                    mode_action = getattr(mode_action_map[gesture_type], 'action', None)
+            if mode_action:
+                cv2.putText(frame, f"Mode Action: {mode_action}", (x_text, y_text + 56), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 180, 255), 2)
+        # FPS overlay (top-left corner)
+        fps_val = self.fps if hasattr(self, 'fps') else 0
+        cv2.putText(frame, f"FPS: {fps_val:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+
+    def _render_game_controller_overlay(self, frame):
+        """Renders the steering box and other game control visuals."""
+        game_controller = get_game_controller()
+        if not game_controller or not game_controller.active:
             return
+
+        overlay_data = game_controller.get_steering_box_data()
+        if not overlay_data:
+            return
+
+        box = overlay_data['box']
         
-        y_offset = 30
+        # Draw main steering box
+        cv2.rectangle(frame, 
+                      (int(box['left']), int(box['top'])), 
+                      (int(box['right']), int(box['bottom'])), 
+                      (255, 255, 0), 2) # Cyan box
+
+        # Draw deadzone
+        cv2.line(frame, 
+                 (int(overlay_data['deadzone_left']), int(box['top'])), 
+                 (int(overlay_data['deadzone_left']), int(box['bottom'])), 
+                 (0, 0, 255), 1) # Red line
+        cv2.line(frame, 
+                 (int(overlay_data['deadzone_right']), int(box['top'])), 
+                 (int(overlay_data['deadzone_right']), int(box['bottom'])), 
+                 (0, 0, 255), 1) # Red line
+
+        palm_center = overlay_data.get('palm_center')
+        if palm_center:
+            cv2.circle(frame, (int(palm_center[0]), int(palm_center[1])), 15, (0, 255, 255), -1) # Yellow filled circle
+            cv2.putText(frame, "Center", 
+                        (int(palm_center[0]) + 20, int(palm_center[1]) + 5), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+        # Draw steering indicator
+        steering_angle = overlay_data['steering_angle']
+        indicator_x = int(box['center_x'] + (steering_angle * (box['width'] / 2)))
+        cv2.circle(frame, (indicator_x, int(box['bottom']) - 20), 15, (0, 255, 0), -1) # Green circle
         
-        # Show hand type exactly like notebook
-        hand_text = f"{region.hand_type.upper()}"
-        hand_color = (255, 0, 0) if region.hand_type == "left" else (0, 0, 255)
-        cv2.putText(frame, hand_text, 
-                   (scaled_points[0][0], scaled_points[0][1] + y_offset),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, hand_color, 2)
-        y_offset += 20
+        # Draw status text
+        status_text = f"Steering: {steering_angle:.2f}"
+        if overlay_data['is_accelerating']:
+            status_text += " | ACCELERATING"
         
-        # Show finger angles exactly like notebook
-        if hasattr(region, 'index_angle') and hasattr(region, 'middle_angle'):
-            angle_text = f"I:{region.index_angle:.0f}° M:{region.middle_angle:.0f}°"
-            cv2.putText(frame, angle_text, 
-                       (scaled_points[0][0], scaled_points[0][1] + y_offset),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-            y_offset += 20
-        
-        # Show finger relationship exactly like notebook
-        if hasattr(region, 'finger_angle_between'):
-            relationship_text = ""
-            relationship_color = (255, 255, 255)
-            
-            if hasattr(region, 'fingers_parallel') and region.fingers_parallel:
-                relationship_text = f"PARALLEL ({region.finger_angle_between:.0f}°)"
-                relationship_color = (0, 255, 255)  # Cyan for parallel
-            elif hasattr(region, 'fingers_perpendicular') and region.fingers_perpendicular:
-                relationship_text = f"PERPENDICULAR ({region.finger_angle_between:.0f}°)"
-                relationship_color = (255, 0, 255)  # Magenta for perpendicular
-            else:
-                relationship_text = f"ANGLED ({region.finger_angle_between:.0f}°)"
-                relationship_color = (128, 128, 128)  # Gray for other angles
-            
-            cv2.putText(frame, relationship_text, 
-                       (scaled_points[0][0], scaled_points[0][1] + y_offset),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, relationship_color, 2)
-            y_offset += 20
-        
-        # Show finger states exactly like notebook
-        if hasattr(region, 'middle_state'):
-            state_text = f"I:{region.index_state} M:{region.middle_state}"
-            cv2.putText(frame, state_text, 
-                       (scaled_points[0][0], scaled_points[0][1] + y_offset),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-            y_offset += 20
-        
-        # Show gesture type exactly like notebook
-        if region.gesture_type == "index_only":
-            if hasattr(region, 'fingers_perpendicular') and region.fingers_perpendicular:
-                gesture_text = "INDEX ONLY (⊥)"  # Perpendicular symbol
-            else:
-                gesture_text = "INDEX ONLY"
-            gesture_color = (0, 255, 0)  # Green
-        elif region.gesture_type == "index_middle_both":
-            gesture_text = "INDEX + MIDDLE (∥)"  # Parallel symbol
-            gesture_color = (0, 255, 255)  # Cyan
-        else:
-            gesture_text = "NO GESTURE"
-            gesture_color = (128, 128, 128)  # Gray
-        
-        cv2.putText(frame, gesture_text, 
-                   (scaled_points[0][0], scaled_points[0][1] + y_offset),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, gesture_color, 2)
-        y_offset += 20
-        
-        # Show MediaPipe gesture exactly like notebook
-        if hasattr(region, 'gesture_name'):
-            mp_text = f"MP: {region.gesture_name}"
-            if hasattr(region, 'gesture_confidence'):
-                mp_text += f" ({region.gesture_confidence:.2f})"
-            cv2.putText(frame, mp_text,
-                       (scaled_points[0][0], scaled_points[0][1] + y_offset),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 192, 203), 2)
-    
-    def _render_complete_status_info(self, frame, processed_regions, need_palm_detection):
-        """Render ALL status information exactly like your notebook"""
-        # Gesture mapping status exactly like notebook
-        gesture_mapping_status = f"Gesture Mapping: {'ON' if self.params['gesture_mapping']['enable_gesture_mapping'] else 'OFF'}"
-        gesture_mapping_color = (0, 255, 0) if self.params['gesture_mapping']['enable_gesture_mapping'] else (0, 0, 255)
-        cv2.putText(frame, gesture_mapping_status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, gesture_mapping_color, 2)
-        
-        # Application mode status exactly like notebook
-        current_mode = self.app_modes['current_mode']
-        if current_mode != 'disabled' and current_mode in self.app_modes:
-            mode_text = f"App Mode: {self.app_modes[current_mode]['name']}"
-            mode_color = (0, 255, 255)  # Cyan for active mode
-            
-            # Add browser sub-mode info exactly like notebook
-            if current_mode == 'browser_mode':
-                right_mode = self.app_modes['browser_mode']['right_hand_mode']
-                mode_text += f" (Right: {right_mode.upper()})"
-        else:
-            mode_text = "App Mode: DISABLED"
-            mode_color = (128, 128, 128)  # Gray for disabled
-        
-        cv2.putText(frame, mode_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, mode_color, 2)
-        
-        # Palm detection state exactly like notebook
-        state_color_map = {
-            'NO_HANDS': (255, 255, 0),          # Yellow
-            'ONE_HAND_SEARCHING': (0, 255, 0),  # Green
-            'ONE_HAND_STABLE': (0, 200, 0),     # Dark Green
-            'TWO_HANDS': (255, 0, 255)          # Magenta
-        }
-        
-        state_text = f"Palm State: {self.params['palm_detection_state']}"
-        
-        # Add countdown timer exactly like notebook
-        if self.params['palm_detection_state'] == 'ONE_HAND_SEARCHING':
-            remaining = self.params['grace_period_duration'] - (time.time() - self.params['grace_period_start'])
-            if remaining > 0:
-                state_text += f" ({remaining:.1f}s)"
-        
-        # Add hand count info exactly like notebook
-        hand_count = len(processed_regions)
-        state_text += f" | Hands: {hand_count}"
-        
-        cv2.putText(frame, state_text, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 
-                   state_color_map.get(self.params['palm_detection_state'], (255, 255, 255)), 2)
-        
-        # Detection mode info exactly like notebook
-        detection_mode = "SMART" if not self.params['always_run_palm_detection'] else "ALWAYS"
-        detection_active = "ACTIVE" if need_palm_detection else "IDLE"
-        detection_info = f"Detection: {detection_mode} ({detection_active})"
-        cv2.putText(frame, detection_info, (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 
-                   (0, 255, 0) if need_palm_detection else (128, 128, 128), 2)
-        
-        # FPS info
-        cv2.putText(frame, f"FPS: {self.fps:.1f}", (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    
+        cv2.putText(frame, status_text, 
+                    (int(box['left']), int(box['top']) - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+    # Remove or comment out _render_complete_gesture_info and _render_complete_status_info calls in the main pipeline.
     def get_status(self):
         """Get engine status"""
         return {
@@ -615,8 +572,20 @@ class CompleteGestureEngine:
         }
     def switch_mode(self, mode_name: str):
         """Switch to a new application mode - delegate to manager"""
+        print(f"🔄 Engine switching to mode: {mode_name}")
         if self.app_mode_manager:
-            return self.app_mode_manager.switch_mode(mode_name)
+            result = self.app_mode_manager.switch_mode(mode_name)
+            print(f"   Mode switch result: {result}")
+            
+            # DEBUG: Check game controller state after switch
+            if mode_name == 'game_mode':
+                game_controller = get_game_controller()
+                if game_controller:
+                    print(f"   Game controller active after switch: {game_controller.active}")
+                else:
+                    print("   ❌ No game controller found after mode switch")
+            
+            return result
         return False
 
 # Global engine instance

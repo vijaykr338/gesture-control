@@ -3,6 +3,7 @@ import os
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
+from game_controller import get_game_controller
 
 @dataclass
 class DetectionConfig:
@@ -45,6 +46,24 @@ class ControlSystemConfig:
     
     enable_key_control: bool = False
     key_press_cooldown: float = 0.6
+    
+    # NEW: Game mode controls (disabled by default - no conflicts)
+    enable_game_control: bool = False
+    game_control_type: str = 'keyboard'  # 'keyboard' or 'directinput'
+    
+    # Racing game specific settings (NFS 2005 MW optimized)
+    steering_box_width: float = 0.4      # 40% of screen width
+    steering_box_height: float = 0.3     # 30% of screen height  
+    steering_box_x: float = 0.3          # X position (30% from left)
+    steering_box_y: float = 0.35         # Y position (35% from top)
+    steering_sensitivity: float = 1.0    # Steering multiplier
+    steering_deadzone: float = 0.1       # Center deadzone (10%)
+    steering_smoothing: float = 0.8      # Steering smoothing
+    steering_exponent: float = 1.0 
+    steering_displacement_amplification: float = 1.0
+    # Game control thresholds
+    open_palm_threshold: float = 0.7     # Confidence for open palm detection
+    game_gesture_cooldown: float = 0.2   # Cooldown between game actions
 
 @dataclass
 class GestureDefinition:
@@ -121,8 +140,11 @@ class ApplicationModesConfig:
     media_mode: ApplicationModeConfig = field(default_factory=lambda: ApplicationModeConfig(name='Media Player Mode'))
     browser_mode: ApplicationModeConfig = field(default_factory=lambda: ApplicationModeConfig(name='Browser Mode'))
     
+    game_mode: Optional[ApplicationModeConfig] = None
+    
     # Browser mode specific
     browser_right_hand_mode: str = 'cursor'  # 'cursor' or 'scroll'
+    # --- FIX: Declare missing browser-specific attributes ---
     browser_iloveyou_switch_cooldown: float = 1.0
     browser_last_iloveyou_switch: float = 0.0
 
@@ -145,9 +167,39 @@ class ConfigurationManager:
         self._initialize_default_app_modes()
         
         # Load existing config if available
-        if self.config_file.exists():
+        config_existed = self.config_file.exists()
+        if config_existed:
             self.load_config()
+
+                # --- FIX: After loading, check if game_mode is missing and add it ---
+        if self.app_modes.game_mode is None:
+            print("🔧 'game_mode' is missing from config. Adding default and saving.")
+            self._initialize_default_game_mode() # Create it
+            self.save_config() # Save it back to the file
+        elif not config_existed:
+            # If the file didn't exist at all, save the complete default config
+            print("🔧 No config file found. Creating one with all defaults.")
+            self.save_config()
     
+
+    def _initialize_default_game_mode(self):
+        """Initializes ONLY the default game mode configuration."""
+        self.app_modes.game_mode = ApplicationModeConfig(name='Game Mode (Racing)')
+        self.app_modes.game_mode.gestures = {
+            'left_index_bent': ApplicationModeGesture(
+                action='key_press', key='x',
+                description='Speedbreaker/Handbrake', cooldown=0.2
+            ),
+            'left_index_middle_bent': ApplicationModeGesture(
+                action='key_press', key='z', 
+                description='Brake', cooldown=0.1
+            ),
+            'fist_gesture': ApplicationModeGesture(
+                action='key_press', key='shift',
+                description='Nitrous', cooldown=0.3
+            )
+        }
+
     def _initialize_default_gestures(self):
         """Initialize default gesture definitions"""
         default_gestures = {
@@ -263,6 +315,24 @@ class ConfigurationManager:
                 description='Right click', cooldown=0.6
             )
         }
+         # NEW: Game Mode (NFS 2005 MW) - Only active when selected
+        self.app_modes.game_mode = ApplicationModeConfig(name='Game Mode (Racing)')
+        self.app_modes.game_mode.gestures = {
+            'left_index_bent': ApplicationModeGesture(
+                action='key_press', key='x',
+                description='Speedbreaker/Handbrake', cooldown=0.2
+            ),
+            'left_index_middle_bent': ApplicationModeGesture(
+                action='key_press', key='z', 
+                description='Brake', cooldown=0.1
+            ),
+            'fist_gesture': ApplicationModeGesture(
+                action='key_press', key='shift',
+                description='Nitrous', cooldown=0.3
+            )
+        }
+
+        self._initialize_default_game_mode()
     
     def save_config(self) -> bool:
         """Save current configuration to file"""

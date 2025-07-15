@@ -4,22 +4,46 @@ import numpy as np
 import math
 from typing import Dict, Any
 from config_manager import ApplicationModeGesture, config_manager
+from game_controller import get_game_controller
+
+
 
 class ApplicationModeManager:
     """Manages application-specific gesture modes and actions using dataclass objects."""
     
     def __init__(self, app_modes_config: Any):
+        
         # Defensively ensure self.app_modes is the dataclass object, not a raw dict.
         if isinstance(app_modes_config, dict):
             self.app_modes = config_manager.app_modes
         else:
             self.app_modes = app_modes_config
         
+        self.game_controller = None  # Lazy initialization
         self.params = {}  # Will be set by engine
         
     def set_engine_params(self, params: Dict[str, Any]):
         """Set reference to engine parameters"""
         self.params = params
+
+        # DEBUG: Print game control settings
+        print(f"🔧 Setting engine params:")
+        print(f"   enable_game_control: {params.get('enable_game_control', False)}")
+        print(f"   game_control_type: {params.get('game_control_type', 'unknown')}")
+        print(f"   steering_sensitivity: {params.get('steering_sensitivity', 'unknown')}")
+
+        # Initialize game controller if game control is enabled
+        if params.get('enable_game_control', False):
+            self.game_controller = get_game_controller(params)
+            print(f"🎮 Game controller created: {self.game_controller is not None}")
+            if self.game_controller:
+                print(f"🎮 Game controller active: {self.game_controller.active}")
+                # Auto-activate if we're in game mode
+                if self.app_modes.current_mode == 'game_mode':
+                    self.game_controller.activate()
+                    print("🎮 Auto-activated game controller for current game mode")
+        else:
+            print("❌ Game control disabled - no controller will be created")
 
     def process_application_modes(self, region):
         """Main processor for application modes, using dataclass attribute access."""
@@ -38,6 +62,12 @@ class ApplicationModeManager:
 
         hand_type = "right" if region.handedness > 0.5 else "left"
         
+        # NEW: Handle game mode with special logic
+        if current_mode_key == 'game_mode':
+            self._handle_game_mode(region, hand_type, mode_config)
+            return  # Game mode has its own logic, don't process standard gestures
+        
+        # Standard mode processing (unchanged)
         detected_gestures = []
         
         # FIXED: Properly map gesture types to gesture IDs
@@ -48,7 +78,6 @@ class ApplicationModeManager:
                 detected_gestures.append(f"{hand_type}_index_middle_bent")
         
         # Check for MediaPipe static gestures
-    #ADD STATIC GESTURE MAPPINGS
         if hasattr(region, 'gesture_name'):
             if region.gesture_name == "Closed_Fist":
                 detected_gestures.append('fist_gesture')
@@ -56,7 +85,6 @@ class ApplicationModeManager:
                 detected_gestures.append('open_palm_gesture')
             elif region.gesture_name == "ILoveYou":
                 detected_gestures.append('iloveyou_gesture')
-            # Add more MediaPipe gesture mappings as needed
             
         # Execute gestures that exist in the current mode
         for gesture_id in set(detected_gestures):
@@ -66,7 +94,7 @@ class ApplicationModeManager:
                 if success:
                     print(f"🎯 Executed {gesture_id} in mode {current_mode_key}")
         
-        # Browser mode special handling
+        # Browser mode special handling (unchanged)
         if current_mode_key == 'browser_mode' and hand_type == "right":
             right_mode = self.app_modes.browser_right_hand_mode
             if right_mode == 'cursor':
@@ -74,24 +102,82 @@ class ApplicationModeManager:
             elif right_mode == 'scroll':
                 self.handle_scroll_control(region, force_enable=True)
 
+    def _handle_game_mode(self, region, hand_type: str, mode_config):
+        """Handle game mode with racing-specific logic"""
+        if not self.game_controller:
+            print(f"❌ Game controller not available! Current controller: {self.game_controller}")
+            return
+
+        # DEBUG: Print what we're processing
+        print(f"🎮 Processing {hand_type} hand in game mode")
+        if hasattr(region, 'gesture_name'):
+            print(f"   Gesture name: {region.gesture_name}")
+        if hasattr(region, 'gesture_type'):
+            print(f"   Gesture type: {region.gesture_type}")
+        if hasattr(region, 'gesture_confidence'):
+            print(f"   Gesture confidence: {region.gesture_confidence}")
+        
+        if hand_type == "right":
+            # Right hand: steering + acceleration (open palm required)
+            is_open_palm = (hasattr(region, 'gesture_name') and 
+                          region.gesture_name == "Open_Palm" and
+                          hasattr(region, 'gesture_confidence') and
+                          region.gesture_confidence > self.params.get('open_palm_threshold', 0.5))
+            
+            print(f"🎮 Right hand - Open palm detected: {is_open_palm}")
+            if hasattr(region, 'gesture_confidence'):
+                print(f"   Confidence: {region.gesture_confidence} (threshold: {self.params.get('open_palm_threshold', 0.5)})")
+            
+            self.game_controller.handle_right_hand_steering(region, is_open_palm)
+            
+        elif hand_type == "left":
+            # Left hand: action gestures (speedbreaker, brake, nitrous)
+            detected_gestures = []
+            
+            # This logic to build the list of gestures is correct
+            if hasattr(region, 'gesture_type'):
+                if region.gesture_type == "index_only":
+                    detected_gestures.append('left_index_bent')
+                elif region.gesture_type == "index_middle_both":
+                    detected_gestures.append('left_index_middle_bent')
+            
+            if (hasattr(region, 'gesture_name') and 
+                region.gesture_name == "Closed_Fist"):
+                detected_gestures.append('fist_gesture')
+            
+            # --- FIXED: This now calls the new update method ---
+            # Instead of executing actions one-by-one, we pass the list of
+            # currently active gestures to the controller to manage the key states.
+            self.game_controller.update_left_hand_actions(detected_gestures)
+
     def switch_mode(self, mode_name: str) -> bool:
         """Switch to a new application mode using dataclass attribute access."""
         current_time = time.time()
         if current_time - self.app_modes.last_mode_switch < self.app_modes.mode_switch_cooldown:
             return False
         
+         # Deactivate current mode
         current_mode_key = self.app_modes.current_mode
         if current_mode_key != 'disabled':
             current_mode_obj = getattr(self.app_modes, current_mode_key, None)
             if current_mode_obj:
                 current_mode_obj.enabled = False
+            
+            # NEW: Deactivate game controller if leaving game mode
+            if current_mode_key == 'game_mode' and self.game_controller:
+                self.game_controller.deactivate()
         
+        # Activate new mode
         self.app_modes.current_mode = mode_name
         new_mode_obj = None
         if mode_name != 'disabled':
             new_mode_obj = getattr(self.app_modes, mode_name, None)
             if new_mode_obj:
                 new_mode_obj.enabled = True
+            
+            # NEW: Activate game controller if entering game mode
+            if mode_name == 'game_mode' and self.game_controller:
+                self.game_controller.activate()
         
         self.app_modes.last_mode_switch = current_time
         
