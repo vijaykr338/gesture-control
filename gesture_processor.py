@@ -9,6 +9,7 @@ from datetime import datetime
 from config_manager import config_manager
 from event_system import event_bus, GestureEvent
 from detection_models import model_manager
+from volume_controller import get_volume_controller
 
 # Import all functions from hand_landmark module
 from hand_landmark import *
@@ -188,9 +189,14 @@ def process_finger_detection(region, params):
         region.finger_angle_between = gesture_data['finger_angle_between']
         region.fingers_parallel = gesture_data['fingers_parallel']
         region.fingers_perpendicular = gesture_data['fingers_perpendicular']
+
+        #  # --- NEW: Pinch Gesture for Volume Control ---
+        # handle_pinch_volume_control(region, params)
         
     except Exception as e:
         print(f"Error processing finger detection: {e}")
+
+
 
 def process_application_modes(region, params, app_modes):
     """Simplified application modes processing for Phase 2"""

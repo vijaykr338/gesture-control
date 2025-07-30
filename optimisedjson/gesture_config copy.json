@@ -7,7 +7,7 @@
         "iou_match_threshold": 0.3,
         "detection_smoothing_alpha": 0.6,
         "gesture_smoothing_frames": 8,
-        "landmark_score_for_palm_redetection_threshold": 0.5,
+        "landmark_score_for_palm_redetection_threshold": 0.4,
         "always_run_palm_detection": false,
         "show_landmarks": true,
         "show_static_gestures": true,
@@ -30,25 +30,19 @@
         "scroll_threshold": 0.1,
         "scroll_smoothing": 0.6,
         "scroll_hand_preference": "any",
-        "enable_volume_control": true,
-        "volume_control_hand": "any",
-        "volume_sensitivity": 1.5,
-        "pinch_threshold_start": 0.1,
-        "pinch_threshold_stop": 0.15,
-        "volume_change_cooldown": 0.05,
         "enable_key_control": false,
         "key_press_cooldown": 0.6,
         "enable_game_control": true,
         "game_control_type": "keyboard",
-        "steering_box_width": 0.09999999999999999,
-        "steering_box_height": 0.09999999999999999,
-        "steering_box_x": 0.01,
+        "steering_box_width": 0.15,
+        "steering_box_height": 0.15,
+        "steering_box_x": 0.005,
         "steering_box_y": 0.25,
         "steering_sensitivity": 0.7,
         "steering_deadzone": 0.07,
         "steering_smoothing": 0.2,
         "steering_exponent": 1.0,
-        "steering_displacement_amplification": 5.0,
+        "steering_displacement_amplification": 4.0,
         "open_palm_threshold": 0.5,
         "game_gesture_cooldown": 0.2
     },
@@ -217,11 +211,6 @@
             "right_index_middle_bent": 1752128557.6661174,
             "fist_gesture": 1752101498.7455697
         },
-        "volume_mode": {
-            "name": "Volume Control Mode",
-            "enabled": false,
-            "gestures": {}
-        },
         "ppt_mode": {
             "name": "PowerPoint Mode",
             "enabled": false,
@@ -337,7 +326,7 @@
                 }
             }
         },
-        "browser_right_hand_mode": "cursor",
+        "browser_right_hand_mode": "scroll",
         "browser_iloveyou_switch_cooldown": 1.0,
         "browser_last_iloveyou_switch": 1752128777.4274223
     }

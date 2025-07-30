@@ -22,12 +22,10 @@ class GameController:
     def __init__(self, params: Dict[str, Any]):
         self.params = params
         self.active = False
-        self.last_palm_center = None
+        self.last_palm_center = None # Add this line
         
         # Game state
-        self.smoothed_steering_angle = 0.0  # NEW: replaces state machine
-        self.target_steering_angle = 0.0    # NEW: replaces state machine
-        self.steering_angle = 0.0           # ADD THIS LINE - for overlay compatibility
+        self.steering_angle = 0.0
         self.is_accelerating = False
         self.last_steering_update = 0.0
         
@@ -37,7 +35,15 @@ class GameController:
         
         # Key state tracking
         self.pressed_keys = set()
-        self.active_action_keys = set()
+        self.active_action_keys = set() # Tracks held action keys (brake, nitrous)
+        
+        # State machine for steering
+        self.steering_state = 'NEUTRAL'  # NEUTRAL, TURN_INITIATE, LIGHT_TURN, HEAVY_TURN, DIRECTION_CHANGE, TURN_RELEASE
+        self.state_start_time = 0.0
+        self.turn_direction = None  # 'LEFT', 'RIGHT', or None
+        self.turn_intensity = 0.0
+        self.last_hand_position = None
+        self.steering_history = []  # For tracking hand movement patterns
     
     def activate(self):
         """Activate game controller"""
@@ -97,16 +103,17 @@ class GameController:
         """
         if not hasattr(region, 'landmarks') or not hasattr(region, 'rect_points') or len(region.landmarks) <= 9:
             return None
-
+            
         rect_points = region.rect_points
-        # Only transform landmark #9 (index 8, since Python is 0-based)
-        landmark = region.landmarks[8]
-        lm_xy_crop_pixels = np.array([(landmark[0] * 224.0, landmark[1] * 224.0)], dtype=np.float32)
+        lm_xy_crop_pixels = np.array([(l[0] * 224.0, l[1] * 224.0) for l in region.landmarks], dtype=np.float32)
         src_crop_coords = np.array([(0, 0), (224, 0), (224, 224)], dtype=np.float32)
         dst_rect_coords = np.array([rect_points[1], rect_points[2], rect_points[3]], dtype=np.float32)
         mat = cv2.getAffineTransform(src_crop_coords, dst_rect_coords)
         lm_xy_transformed = cv2.transform(np.expand_dims(lm_xy_crop_pixels, axis=0), mat)
-        raw_screen_x, raw_screen_y = tuple(np.squeeze(lm_xy_transformed).astype(np.float32))
+        lm_xy_final = np.squeeze(lm_xy_transformed).astype(np.int32)
+        
+        # Get landmark #9 (middle finger base) coordinates
+        raw_screen_x, raw_screen_y = lm_xy_final[8].astype(float)
 
         # Amplify the displacement from the center of the steering box
         amplification = self.params.get('steering_displacement_amplification', 1.0)
@@ -127,62 +134,30 @@ class GameController:
         return (screen_x, screen_y)
 
     def handle_right_hand_steering(self, region, is_open_palm: bool):
-        """Handle right hand steering with smooth, analog-like control."""
+        """Handle right hand steering for any detected hand (no gesture restriction)."""
         if not self.active:
-            self.last_palm_center = None
+            self.last_palm_center = None # Reset on inactive
             return
 
         palm_center_px = self._get_palm_center_screen_coords(region)
-        self.last_palm_center = palm_center_px
+        self.last_palm_center = palm_center_px # Store the calculated center
         if palm_center_px is None:
             self._release_key('left')
             self._release_key('right')
             return
 
         screen_x, screen_y = palm_center_px
-        if not self._is_in_steering_box(screen_x, screen_y):
+        box = self.steering_box
+        in_box = self._is_in_steering_box(screen_x, screen_y)
+        if not in_box:
             self._release_key('left')
             self._release_key('right')
-            self.target_steering_angle = 0.0
-            self._apply_smoothed_steering()
             return
 
-        # Calculate target steering angle
-        relative_x = (screen_x - self.steering_box['left']) / self.steering_box['width']
-        deadzone = self.params.get('steering_deadzone', 0.1)
-        target_angle = 0.0
-        if relative_x < 0.5 - deadzone:
-            target_angle = (relative_x - (0.5 - deadzone)) / (0.5 - deadzone)
-        elif relative_x > 0.5 + deadzone:
-            target_angle = (relative_x - (0.5 + deadzone)) / (0.5 - deadzone)
-        sensitivity = self.params.get('steering_sensitivity', 1.0)
-        exponent = self.params.get('steering_exponent', 1.0)
-        angle_sign = -1 if target_angle < 0 else 1
-        target_angle = angle_sign * (abs(target_angle) ** exponent)
-        self.target_steering_angle = max(-1.0, min(1.0, -target_angle * sensitivity))
+        old_angle = self.steering_angle
+        self._calculate_steering_angle(screen_x)
+        self._apply_controls()
 
-        self._apply_smoothed_steering()
-
-
-    def _apply_smoothed_steering(self):
-        smoothing_factor = self.params.get('steering_smoothing', 0.2)
-        self.smoothed_steering_angle += (self.target_steering_angle - self.smoothed_steering_angle) * smoothing_factor
-
-        # Keep legacy attribute in sync for overlay
-        self.steering_angle = self.smoothed_steering_angle
-
-        turn_threshold = 0.1
-        if self.smoothed_steering_angle < -turn_threshold:
-            self._press_key('left')
-            self._release_key('right')
-        elif self.smoothed_steering_angle > turn_threshold:
-            self._press_key('right')
-            self._release_key('left')
-        else:
-            self._release_key('left')
-            self._release_key('right')
-
-            
     def update_left_hand_actions(self, detected_gestures_this_frame: list):
         """Updates the state of held keys based on the gestures detected in the current frame."""
         if not self.active: return

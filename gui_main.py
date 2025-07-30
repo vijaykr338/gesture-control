@@ -6,9 +6,9 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                             QTabWidget, QDoubleSpinBox, QListWidget, QStackedWidget,
                             QListWidgetItem, QFrame, QLineEdit, QStyle, QTextEdit, 
                             QDialog, QInputDialog, QButtonGroup, QSizePolicy)
-from PyQt6.QtGui import QPixmap, QImage, QFont, QIcon, QColor
-from PyQt6.QtCore import Qt, QSize, QThread, QPoint, QRect, QMargins
-
+from PyQt6.QtGui import QPixmap, QImage, QFont, QIcon, QColor, QKeySequence
+from PyQt6.QtCore import Qt, QSize, QThread, QPoint, QRect, QMargins, pyqtSignal
+from typing import Optional
 from gui_worker import GestureEngineWorker
 from config_manager import config_manager, ApplicationModeConfig, ApplicationModeGesture
 
@@ -99,6 +99,138 @@ class FlowLayout(QGridLayout):
             line_height = max(line_height, item.sizeHint().height())
 
         return y + line_height - rect.y()
+
+
+class KeyCaptureButton(QPushButton):
+    """A button that captures a key combination of any length when clicked."""
+    binding_changed = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__("Click to bind", parent)
+        self.is_recording = False
+        self.binding_keys = []  # The final, saved list of keys
+        self.temp_keys = set()  # A temporary set for recording to avoid duplicates
+        self.setToolTip("Double-left-click to bind keys.\nDouble-right-click to clear.\nPress Enter to save, Esc to cancel.")
+        self.setStyleSheet("""
+            QPushButton {
+                text-align: left;
+                padding-left: 10px;
+                background-color: #3e3e42;
+                border: 1px solid #5a5a5a;
+                color: #ffffff;
+                min-height: 28px;
+            }
+            QPushButton:hover {
+                border-color: #0078d4;
+            }
+            QPushButton:focus {
+                border: 2px solid #0078d4;
+                background-color: #4a4a4e;
+            }
+        """)
+
+    def getBindingString(self) -> str:
+        """Returns the binding as a sorted, lowercase, '+'-separated string."""
+        modifiers = sorted([k for k in self.binding_keys if k in ['ctrl', 'alt', 'shift', 'win']])
+        primary = sorted([k for k in self.binding_keys if k not in ['ctrl', 'alt', 'shift', 'win']])
+        return "+".join(modifiers + primary).lower()
+
+    def setBinding(self, key_string: Optional[str]):
+        """Sets the binding from a string like 'ctrl+s'."""
+        if key_string and isinstance(key_string, str):
+            self.binding_keys = [key for key in key_string.lower().split('+') if key]
+        else:
+            self.binding_keys = []
+        self._update_text()
+
+    def _update_text(self):
+        """Updates the button's display text based on its state."""
+        keys_to_display = self.temp_keys if self.is_recording else self.binding_keys
+        
+        if self.is_recording and not keys_to_display:
+            self.setText("Press keys...")
+        elif not keys_to_display:
+            self.setText("Click to bind")
+        else:
+            modifiers = sorted([k for k in keys_to_display if k in ['ctrl', 'alt', 'shift', 'win']])
+            primary = sorted([k for k in keys_to_display if k not in ['ctrl', 'alt', 'shift', 'win']])
+            display_keys = [k.title() for k in (modifiers + primary)]
+            self.setText(" + ".join(display_keys))
+
+    def mouseDoubleClickEvent(self, event):
+        """Handle double-click events for starting recording or resetting."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            if not self.is_recording:
+                self._start_recording()
+        elif event.button() == Qt.MouseButton.RightButton:
+            self._reset_binding()
+        super().mouseDoubleClickEvent(event)
+
+    def keyPressEvent(self, event: QKeySequence):
+        if self.is_recording:
+            if event.isAutoRepeat():
+                return
+
+            key = event.key()
+
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self._stop_recording(save_changes=True)
+                return
+            if key == Qt.Key.Key_Escape:
+                self._stop_recording(save_changes=False)
+                return
+            
+            key_name = ""
+            if key == Qt.Key.Key_Control: key_name = 'ctrl'
+            elif key == Qt.Key.Key_Shift: key_name = 'shift'
+            elif key == Qt.Key.Key_Alt: key_name = 'alt'
+            elif key == Qt.Key.Key_Meta: key_name = 'win'
+            elif key != Qt.Key.Key_unknown:
+                key_name = QKeySequence(key).toString().lower()
+
+            if key_name:
+                self.temp_keys.add(key_name)
+            
+            self._update_text()
+        else:
+            super().keyPressEvent(event)
+
+    def focusOutEvent(self, event):
+        if self.is_recording:
+            self._stop_recording(save_changes=True)
+        super().focusOutEvent(event)
+
+    def _start_recording(self):
+        self.is_recording = True
+        self.temp_keys = set(self.binding_keys)
+        self.grabKeyboard()
+        self._update_text()
+
+    def _stop_recording(self, save_changes=True):
+        if not self.is_recording:
+            return
+            
+        self.is_recording = False
+        self.releaseKeyboard()
+        
+        if save_changes:
+            self.binding_keys = list(self.temp_keys)
+            self.binding_changed.emit(self.getBindingString())
+
+        self.temp_keys.clear()
+        self._update_text()
+
+    def _reset_binding(self):
+        """Resets the current binding to empty."""
+        if self.is_recording:
+            self._stop_recording(save_changes=False)
+        self.binding_keys = []
+        self.temp_keys.clear()
+        self.binding_changed.emit("")
+        self._update_text()
+
+
+
 
 class CustomModeDialog(QDialog):
     """Modal dialog for creating/editing custom gesture modes."""
@@ -292,60 +424,8 @@ class CustomModeDialog(QDialog):
         action_stack = QStackedWidget()
         
         # --- Page 0: Key Combination Builder ---
-        key_combo_widget = QWidget()
-        key_combo_layout = QHBoxLayout(key_combo_widget)
-        key_combo_layout.setContentsMargins(0, 0, 0, 0)
-        key_combo_layout.setSpacing(5)
-
-        key_combos = []
-        for i in range(3): # Max 3 keys
-            combo = QComboBox()
-            combo.addItems(self.all_keys_sorted)
-            combo.setVisible(i == 0)
-            key_combos.append(combo)
-            key_combo_layout.addWidget(combo)
-
-        add_key_btn = QPushButton("Add Key")
-        add_key_btn.setMaximumWidth(80)
-        add_key_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4caf50;
-                color: white;
-                border: 1px solid #45a049;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
-        
-        remove_key_btn = QPushButton("Remove")
-        remove_key_btn.setMaximumWidth(80)
-        remove_key_btn.setVisible(False)
-        remove_key_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                border: 1px solid #da190b;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
-            }
-        """)
-
-        key_combo_layout.addWidget(add_key_btn)
-        key_combo_layout.addWidget(remove_key_btn)
-        key_combo_layout.addStretch()
-        
-        add_key_btn.clicked.connect(lambda _, key=gesture_key: self._add_key_combo(key))
-        remove_key_btn.clicked.connect(lambda _, key=gesture_key: self._remove_key_combo(key))
-        
-        action_stack.addWidget(key_combo_widget)
+        key_capture_button = KeyCaptureButton()
+        action_stack.addWidget(key_capture_button)
 
         # --- Page 1: Mouse Button Selector ---
         mouse_button_combo = QComboBox()
@@ -361,6 +441,7 @@ class CustomModeDialog(QDialog):
         cooldown_spin.setValue(0.8)
         controls_layout.addWidget(cooldown_spin, 4, 1)
         
+        # --- FIX: Add the controls layout and store the widgets ---
         layout.addLayout(controls_layout)
         
         self.gesture_widgets[gesture_key] = {
@@ -369,9 +450,7 @@ class CustomModeDialog(QDialog):
             'key_press_btn': key_press_btn,
             'mouse_click_btn': mouse_click_btn,
             'action_stack': action_stack,
-            'key_combos': key_combos,
-            'add_key_btn': add_key_btn,
-            'remove_key_btn': remove_key_btn,
+            'key_capture_button': key_capture_button,
             'mouse_button_combo': mouse_button_combo,
             'cooldown': cooldown_spin,
         }
@@ -379,6 +458,7 @@ class CustomModeDialog(QDialog):
         # Disable all controls by default until 'Enable' is checked
         self.toggle_gesture_controls(gesture_key, False)
         
+        # --- FIX: Return the created card widget ---
         return card
 
     def _add_key_combo(self, gesture_key):
@@ -413,8 +493,7 @@ class CustomModeDialog(QDialog):
         widgets['key_press_btn'].parent().setEnabled(enabled)
         widgets['cooldown'].setEnabled(enabled)
         widgets['action_stack'].setEnabled(enabled)
-        widgets['add_key_btn'].setEnabled(enabled)
-        widgets['remove_key_btn'].setEnabled(enabled)
+
 
 
     def load_existing_mode(self):
@@ -438,20 +517,8 @@ class CustomModeDialog(QDialog):
                 if gesture_data.action == 'key_press':
                     widgets['key_press_btn'].setChecked(True)
                     widgets['action_stack'].setCurrentIndex(0)
-                    
-                    keys = gesture_data.key.split('+')
-                    key_combos = widgets['key_combos']
-                    
-                    for i, combo in enumerate(key_combos):
-                        if i < len(keys):
-                            combo.setCurrentText(keys[i])
-                            combo.setVisible(True)
-                        else:
-                            combo.setVisible(False)
-                    
-                    num_keys = len(keys)
-                    widgets['add_key_btn'].setVisible(num_keys < 3)
-                    widgets['remove_key_btn'].setVisible(num_keys > 1)
+                    # --- FIX: Use the new key capture button ---
+                    widgets['key_capture_button'].setBinding(gesture_data.key)
 
                 elif gesture_data.action == 'mouse_click':
                     widgets['mouse_click_btn'].setChecked(True)
@@ -487,11 +554,11 @@ class CustomModeDialog(QDialog):
                 button = None
                 
                 if action == 'key_press':
-                    key_parts = []
-                    for combo in widgets['key_combos']:
-                        if combo.isVisible():
-                            key_parts.append(combo.currentText())
-                    key = '+'.join(key_parts) if key_parts else 'space'
+                    # --- FIX: Use the new key capture button ---
+                    key = widgets['key_capture_button'].getBindingString()
+                    if not key: # Ensure a key is bound
+                        QMessageBox.warning(self, "Input Error", f"No key bound for gesture: {get_gesture_display_name(gesture_key)}")
+                        return
                 else: # mouse_click
                     button = widgets['mouse_button_combo'].currentText()
 
@@ -639,92 +706,174 @@ class SettingsDialog(QDialog):
 
     def create_control_tab(self):
         tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setSpacing(20)
+        main_layout = QVBoxLayout(tab)
+        main_layout.setSpacing(10)
 
-        # Cursor Control
+        # Create a QTabWidget for sub-sections
+        sub_tabs = QTabWidget()
+        main_layout.addWidget(sub_tabs)
+
+        # --- Cursor Control Tab ---
+        cursor_tab = QWidget()
+        cursor_layout = QVBoxLayout(cursor_tab)
+        cursor_layout.setContentsMargins(10, 10, 10, 10)
+        cursor_layout.setSpacing(20)
         group_cursor = QGroupBox("Cursor Control")
+        group_cursor.setStyleSheet("QGroupBox { padding: 18px; }")
         grid_cursor = QGridLayout(group_cursor)
+        grid_cursor.setHorizontalSpacing(20)
+        grid_cursor.setVerticalSpacing(12)
         self.enable_cursor_cb = QCheckBox("Enable Cursor Control")
         grid_cursor.addWidget(self.enable_cursor_cb, 0, 0, 1, 2)
-
         self.cursor_smoothing_spin = QDoubleSpinBox()
         self.cursor_smoothing_spin.setRange(0.0, 1.0)
         self.cursor_smoothing_spin.setSingleStep(0.05)
         self._add_widget(grid_cursor, 1, "Cursor Smoothing:", self.cursor_smoothing_spin)
-
         self.cursor_sensitivity_spin = QDoubleSpinBox()
         self.cursor_sensitivity_spin.setRange(0.5, 10.0)
         self.cursor_sensitivity_spin.setSingleStep(0.1)
         self._add_widget(grid_cursor, 2, "Cursor Sensitivity:", self.cursor_sensitivity_spin)
-        layout.addWidget(group_cursor)
+        cursor_layout.addWidget(group_cursor)
+        cursor_layout.addStretch()
+        cursor_scroll = QScrollArea()
+        cursor_scroll.setWidgetResizable(True)
+        cursor_scroll.setWidget(cursor_tab)
+        sub_tabs.addTab(cursor_scroll, "Cursor")
 
-        # Scroll Control
+        # --- Scroll Control Tab ---
+        scroll_tab = QWidget()
+        scroll_layout = QVBoxLayout(scroll_tab)
+        scroll_layout.setContentsMargins(10, 10, 10, 10)
+        scroll_layout.setSpacing(20)
         group_scroll = QGroupBox("Scroll Control")
+        group_scroll.setStyleSheet("QGroupBox { padding: 18px; }")
         grid_scroll = QGridLayout(group_scroll)
+        grid_scroll.setHorizontalSpacing(20)
+        grid_scroll.setVerticalSpacing(12)
         self.enable_scroll_cb = QCheckBox("Enable Scroll Control")
         grid_scroll.addWidget(self.enable_scroll_cb, 0, 0, 1, 2)
-
         self.scroll_sensitivity_spin = QSpinBox()
         self.scroll_sensitivity_spin.setRange(1, 50)
         self._add_widget(grid_scroll, 1, "Scroll Sensitivity:", self.scroll_sensitivity_spin)
-
         self.scroll_threshold_spin = QDoubleSpinBox()
         self.scroll_threshold_spin.setRange(0.01, 0.2)
         self.scroll_threshold_spin.setSingleStep(0.01)
         self._add_widget(grid_scroll, 2, "Scroll Activation Threshold:", self.scroll_threshold_spin)
-
         self.scroll_smoothing_spin = QDoubleSpinBox()
         self.scroll_smoothing_spin.setRange(0.0, 1.0)
         self.scroll_smoothing_spin.setSingleStep(0.05)
         self._add_widget(grid_scroll, 3, "Scroll Smoothing:", self.scroll_smoothing_spin)
-
         self.scroll_hand_pref_combo = QComboBox()
         self.scroll_hand_pref_combo.addItems(['any', 'left', 'right'])
         self._add_widget(grid_scroll, 4, "Scroll Hand Preference:", self.scroll_hand_pref_combo)
-        layout.addWidget(group_scroll)
+        scroll_layout.addWidget(group_scroll)
+        scroll_layout.addStretch()
+        scroll_scroll = QScrollArea()
+        scroll_scroll.setWidgetResizable(True)
+        scroll_scroll.setWidget(scroll_tab)
+        sub_tabs.addTab(scroll_scroll, "Scroll")
 
-        # Keyboard Control
+        # --- Keyboard Control Tab ---
+        key_tab = QWidget()
+        key_layout = QVBoxLayout(key_tab)
+        key_layout.setContentsMargins(10, 10, 10, 10)
+        key_layout.setSpacing(20)
         group_key = QGroupBox("Keyboard Control")
+        group_key.setStyleSheet("QGroupBox { padding: 18px; }")
         grid_key = QGridLayout(group_key)
+        grid_key.setHorizontalSpacing(20)
+        grid_key.setVerticalSpacing(12)
         self.enable_key_control_cb = QCheckBox("Enable General Key Control")
         grid_key.addWidget(self.enable_key_control_cb, 0, 0, 1, 2)
-
         self.key_cooldown_spin = QDoubleSpinBox()
         self.key_cooldown_spin.setRange(0.1, 5.0)
         self.key_cooldown_spin.setSingleStep(0.1)
         self.key_cooldown_spin.setSuffix(" s")
         self._add_widget(grid_key, 1, "Key Press Cooldown:", self.key_cooldown_spin)
-        layout.addWidget(group_key)
+        key_layout.addWidget(group_key)
+        key_layout.addStretch()
+        key_scroll = QScrollArea()
+        key_scroll.setWidgetResizable(True)
+        key_scroll.setWidget(key_tab)
+        sub_tabs.addTab(key_scroll, "Keyboard")
 
-                # NEW: Game Control Section
+        # --- Game Control Tab ---
+        game_tab = QWidget()
+        game_layout = QVBoxLayout(game_tab)
+        game_layout.setContentsMargins(10, 10, 10, 10)
+        game_layout.setSpacing(20)
         group_game = QGroupBox("Game Control (Racing)")
+        group_game.setStyleSheet("QGroupBox { padding: 18px; }")
         grid_game = QGridLayout(group_game)
-        
+        grid_game.setHorizontalSpacing(20)
+        grid_game.setVerticalSpacing(12)
         self.enable_game_cb = QCheckBox("Enable Game Control Mode")
         grid_game.addWidget(self.enable_game_cb, 0, 0, 1, 2)
-
         self.game_control_type_combo = QComboBox()
         self.game_control_type_combo.addItems(['keyboard', 'directinput'])
         self._add_widget(grid_game, 1, "Input Method:", self.game_control_type_combo)
-
         self.steering_sensitivity_spin = QDoubleSpinBox()
         self.steering_sensitivity_spin.setRange(0.1, 3.0)
         self.steering_sensitivity_spin.setSingleStep(0.1)
         self._add_widget(grid_game, 2, "Steering Sensitivity:", self.steering_sensitivity_spin)
-
         self.steering_deadzone_spin = QDoubleSpinBox()
         self.steering_deadzone_spin.setRange(0.0, 0.3)
         self.steering_deadzone_spin.setSingleStep(0.01)
         self._add_widget(grid_game, 3, "Steering Deadzone:", self.steering_deadzone_spin)
-
         self.open_palm_threshold_spin = QDoubleSpinBox()
         self.open_palm_threshold_spin.setRange(0.3, 1.0)
         self.open_palm_threshold_spin.setSingleStep(0.05)
         self._add_widget(grid_game, 4, "Open Palm Threshold:", self.open_palm_threshold_spin)
-        
-        layout.addWidget(group_game)
-        layout.addStretch()
+
+        # Add the missing parameters:
+        self.steering_box_width_spin = QDoubleSpinBox()
+        self.steering_box_width_spin.setRange(0.05, 1.0)
+        self.steering_box_width_spin.setSingleStep(0.01)
+        self._add_widget(grid_game, 5, "Steering Box Width:", self.steering_box_width_spin)
+
+        self.steering_box_height_spin = QDoubleSpinBox()
+        self.steering_box_height_spin.setRange(0.05, 1.0)
+        self.steering_box_height_spin.setSingleStep(0.01)
+        self._add_widget(grid_game, 6, "Steering Box Height:", self.steering_box_height_spin)
+
+        self.steering_box_x_spin = QDoubleSpinBox()
+        self.steering_box_x_spin.setRange(0.0, 1.0)
+        self.steering_box_x_spin.setSingleStep(0.01)
+        self._add_widget(grid_game, 7, "Steering Box X:", self.steering_box_x_spin)
+
+        self.steering_box_y_spin = QDoubleSpinBox()
+        self.steering_box_y_spin.setRange(0.0, 1.0)
+        self.steering_box_y_spin.setSingleStep(0.01)
+        self._add_widget(grid_game, 8, "Steering Box Y:", self.steering_box_y_spin)
+
+        self.steering_smoothing_spin = QDoubleSpinBox()
+        self.steering_smoothing_spin.setRange(0.0, 1.0)
+        self.steering_smoothing_spin.setSingleStep(0.01)
+        self._add_widget(grid_game, 9, "Steering Smoothing:", self.steering_smoothing_spin)
+
+        self.steering_exponent_spin = QDoubleSpinBox()
+        self.steering_exponent_spin.setRange(0.1, 3.0)
+        self.steering_exponent_spin.setSingleStep(0.1)
+        self._add_widget(grid_game, 10, "Steering Exponent:", self.steering_exponent_spin)
+
+        self.steering_displacement_amplification_spin = QDoubleSpinBox()
+        self.steering_displacement_amplification_spin.setRange(0.1, 10.0)
+        self.steering_displacement_amplification_spin.setSingleStep(0.1)
+        self._add_widget(grid_game, 11, "Steering Displacement Amplification:", self.steering_displacement_amplification_spin)
+
+        self.game_gesture_cooldown_spin = QDoubleSpinBox()
+        self.game_gesture_cooldown_spin.setRange(0.05, 2.0)
+        self.game_gesture_cooldown_spin.setSingleStep(0.01)
+        self._add_widget(grid_game, 12, "Game Gesture Cooldown:", self.game_gesture_cooldown_spin)
+
+        game_layout.addWidget(group_game)
+        game_layout.addStretch()
+        game_scroll = QScrollArea()
+        game_scroll.setWidgetResizable(True)
+        game_scroll.setWidget(game_tab)
+        sub_tabs.addTab(game_scroll, "Game")
+
+        main_layout.addStretch()
         return tab
 
     def create_smart_palm_tab(self):
@@ -832,6 +981,14 @@ class SettingsDialog(QDialog):
         self.steering_sensitivity_spin.setValue(config_manager.control_system.steering_sensitivity)
         self.steering_deadzone_spin.setValue(config_manager.control_system.steering_deadzone)
         self.open_palm_threshold_spin.setValue(config_manager.control_system.open_palm_threshold)
+        self.steering_box_width_spin.setValue(config_manager.control_system.steering_box_width)
+        self.steering_box_height_spin.setValue(config_manager.control_system.steering_box_height)
+        self.steering_box_x_spin.setValue(config_manager.control_system.steering_box_x)
+        self.steering_box_y_spin.setValue(config_manager.control_system.steering_box_y)
+        self.steering_smoothing_spin.setValue(config_manager.control_system.steering_smoothing)
+        self.steering_exponent_spin.setValue(config_manager.control_system.steering_exponent)
+        self.steering_displacement_amplification_spin.setValue(config_manager.control_system.steering_displacement_amplification)
+        self.game_gesture_cooldown_spin.setValue(config_manager.control_system.game_gesture_cooldown)
 
     def save_settings(self):
         """Save all settings from UI to config manager."""
@@ -864,12 +1021,21 @@ class SettingsDialog(QDialog):
         config_manager.smart_palm.periodic_check_interval = self.periodic_check_spin.value()
         config_manager.smart_palm.state_transition_debug = self.state_debug_cb.isChecked()
 
- # NEW: Game Control Settings
+
+        # Game Control Settings
         config_manager.control_system.enable_game_control = self.enable_game_cb.isChecked()
         config_manager.control_system.game_control_type = self.game_control_type_combo.currentText()
         config_manager.control_system.steering_sensitivity = self.steering_sensitivity_spin.value()
         config_manager.control_system.steering_deadzone = self.steering_deadzone_spin.value()
         config_manager.control_system.open_palm_threshold = self.open_palm_threshold_spin.value()
+        config_manager.control_system.steering_box_width = self.steering_box_width_spin.value()
+        config_manager.control_system.steering_box_height = self.steering_box_height_spin.value()
+        config_manager.control_system.steering_box_x = self.steering_box_x_spin.value()
+        config_manager.control_system.steering_box_y = self.steering_box_y_spin.value()
+        config_manager.control_system.steering_smoothing = self.steering_smoothing_spin.value()
+        config_manager.control_system.steering_exponent = self.steering_exponent_spin.value()
+        config_manager.control_system.steering_displacement_amplification = self.steering_displacement_amplification_spin.value()
+        config_manager.control_system.game_gesture_cooldown = self.game_gesture_cooldown_spin.value()
         
         config_manager.save_config()
         QMessageBox.information(self, "Settings Saved", "All settings have been applied and saved successfully!")
@@ -904,6 +1070,84 @@ class NoArrowKeyComboBox(QComboBox):
             return
         super().keyPressEvent(event)
 
+
+class PopoutWindow(QWidget):
+    stop_engine_requested = pyqtSignal()
+    pause_engine_requested = pyqtSignal()
+    mode_changed_requested = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Gesture Control Mini")
+        self.setMinimumSize(320, 240)
+        self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Window)
+        self.is_docked = False
+        self.popout_window = None
+
+        layout = QVBoxLayout(self)
+        self.video_label = QLabel("Waiting for camera...")
+        self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_label.setStyleSheet("background-color: black; color: white; border-radius: 4px;")
+        self.video_label.setMinimumSize(400, 300)  # Increased size (width, height)
+        self.video_label.setMaximumSize(800, 600)
+        layout.addWidget(self.video_label, 1)
+
+        controls = QHBoxLayout()
+        self.mode_combo = QComboBox()
+        self.pause_button = QPushButton("Pause")
+        self.stop_button = QPushButton("Stop")
+        self.dock_button = QPushButton("📌 Dock")
+        self.dock_button.setCheckable(True)
+        controls.addWidget(self.mode_combo)
+        controls.addWidget(self.pause_button)
+        controls.addWidget(self.stop_button)
+        controls.addWidget(self.dock_button)
+        layout.addLayout(controls)
+
+        self.stop_button.clicked.connect(self.stop_engine_requested.emit)
+        self.pause_button.clicked.connect(self.pause_engine_requested.emit)
+        self.mode_combo.currentTextChanged.connect(self.mode_changed_requested.emit)
+        self.dock_button.toggled.connect(self.toggle_dock)
+
+    def update_video(self, rgb_frame):
+        h, w, ch = rgb_frame.shape
+        bytes_per_line = ch * w
+        q_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        pixmap = QPixmap.fromImage(q_image)
+        self.video_label.setPixmap(pixmap.scaled(
+            self.video_label.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        ))
+
+    def populate_modes(self, modes: list, current_mode: str):
+        self.mode_combo.blockSignals(True)
+        self.mode_combo.clear()
+        self.mode_combo.addItems(modes)
+        self.mode_combo.setCurrentText(current_mode)
+        self.mode_combo.blockSignals(False)
+
+    def toggle_dock(self, docked: bool):
+        self.is_docked = docked
+        if docked:
+            self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+            screen_geometry = QApplication.primaryScreen().geometry()
+            self.setGeometry(
+                screen_geometry.width() - self.width() - 10,
+                screen_geometry.height() - self.height() - 45,
+                self.width(),
+                self.height()
+            )
+            self.dock_button.setText("↩️ Undock")
+        else:
+            self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
+            self.dock_button.setText("📌 Dock")
+        self.show()
+
+    def closeEvent(self, event):
+        self.stop_engine_requested.emit()
+        super().closeEvent(event)
+
 class GestureDashboard(QMainWindow):
     """
     Modern gesture control dashboard with custom mode functionality.
@@ -917,6 +1161,7 @@ class GestureDashboard(QMainWindow):
         self.worker_thread = None
         self.gesture_widgets = {}
         self.mode_tags_group = QButtonGroup()
+        self.popout_window = None
 
         self.apply_stylesheet()
         self.setup_ui()
@@ -1445,7 +1690,8 @@ class GestureDashboard(QMainWindow):
 
     # Engine control methods
     def start_engine(self):
-        if self.worker_thread is not None: return
+        if self.worker_thread is not None:
+            return
         self.worker = GestureEngineWorker()
         self.worker_thread = QThread()
         self.worker.moveToThread(self.worker_thread)
@@ -1458,8 +1704,21 @@ class GestureDashboard(QMainWindow):
         self.pause_btn.setEnabled(True)
         self.status_bar.showMessage("Engine starting...")
 
+        # --- Popout window logic ---
+        self.popout_window = PopoutWindow()
+        self.popout_window.stop_engine_requested.connect(self.stop_engine)
+        self.popout_window.pause_engine_requested.connect(self.pause_resume_engine)
+        self.popout_window.mode_changed_requested.connect(self.change_mode)
+        self.worker.new_frame.connect(self.popout_window.update_video)
+        all_modes = [self.mode_combo.itemText(i) for i in range(self.mode_combo.count())]
+        self.popout_window.populate_modes(all_modes, self.mode_combo.currentText())
+        self.popout_window.show()
+        self.showMinimized()
+
+    
     def stop_engine(self):
-        if self.worker: self.worker.stop()
+        if self.worker:
+            self.worker.stop()
         if self.worker_thread:
             self.worker_thread.quit()
             self.worker_thread.wait()
@@ -1470,6 +1729,12 @@ class GestureDashboard(QMainWindow):
         self.pause_btn.setText("⏸️ Pause")
         self.video_label.setText("🎥 Gesture Engine Offline")
         self.status_bar.showMessage("Engine stopped.")
+        if self.popout_window:
+            self.popout_window.blockSignals(True)
+            self.popout_window.close()
+            self.popout_window = None
+        self.showNormal()
+        self.activateWindow()
 
     def pause_resume_engine(self):
         if self.worker:

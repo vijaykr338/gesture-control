@@ -16,6 +16,7 @@ from application_modes import ApplicationModeManager
 import pyautogui
 from game_controller import get_game_controller
 
+
 class CompleteGestureEngine:
     """Complete gesture detection engine with full visual rendering like your notebook"""
     
@@ -165,26 +166,27 @@ class CompleteGestureEngine:
             return original_frame
         
         try:
-            # Process frame EXACTLY like your notebook main loop
             frame_h, frame_w = original_frame.shape[:2]
-            
-            # Preprocess frame
             resized_frame_for_input = cv2.resize(frame, (self.params['input_size'], self.params['input_size']))
-            
+
             # Smart palm detection state machine
             current_hand_count = len(self.params['previous_frame_processed_regions'])
-            need_palm_detection = self._smart_palm_detection_state_machine(current_hand_count)
-            
-            # Fallback to original logic if state machine says no
-            if not need_palm_detection:
-                need_palm_detection = (
-                    self.params['always_run_palm_detection'] or
-                    should_run_palm_detection(
-                        self.params['previous_frame_processed_regions'], 
-                        self.params['landmark_score_for_palm_redetection_threshold']
+
+            # --- FORCE PALM DETECTION IN GAME MODE UNTIL BOTH HANDS FOUND ---
+            in_game_mode = (self.app_mode_manager.app_modes.current_mode == 'game_mode')
+            if in_game_mode and current_hand_count < 2:
+                need_palm_detection = True
+            else:
+                need_palm_detection = self._smart_palm_detection_state_machine(current_hand_count)
+                if not need_palm_detection:
+                    need_palm_detection = (
+                        self.params['always_run_palm_detection'] or
+                        should_run_palm_detection(
+                            self.params['previous_frame_processed_regions'], 
+                            self.params['landmark_score_for_palm_redetection_threshold']
+                        )
                     )
-                )
-            
+                        
             current_regions_for_processing = []
             
             if need_palm_detection:

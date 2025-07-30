@@ -61,6 +61,10 @@ class ApplicationModeManager:
             return
 
         hand_type = "right" if region.handedness > 0.5 else "left"
+
+        if current_mode_key == 'volume_mode':
+            self.handle_pinch_volume_control(region)
+            return
         
         # NEW: Handle game mode with special logic
         if current_mode_key == 'game_mode':
@@ -184,6 +188,70 @@ class ApplicationModeManager:
         mode_display = new_mode_obj.name if new_mode_obj else 'Disabled'
         print(f"🔄 MODE SWITCH: {mode_display}")
         return True
+    
+        
+    def handle_pinch_volume_control(self, region):
+        params = self.params
+        if not params.get('enable_volume_control', False):
+            return
+
+        if not hasattr(region, 'landmarks') or len(region.landmarks) < 9:
+            return
+
+        hand_pref = params.get('volume_control_hand', 'any')
+        if hand_pref != 'any' and region.hand_type != hand_pref:
+            return
+
+        thumb_tip = np.array(region.landmarks[4][:2])
+        index_tip = np.array(region.landmarks[8][:2])
+        pinch_dist = np.linalg.norm(thumb_tip - index_tip)
+
+        # --- Smoothing ---
+        smoothing_alpha = 0.5  # 0.0 = no smoothing, 1.0 = max smoothing
+        if not hasattr(region, 'smoothed_pinch_dist'):
+            region.smoothed_pinch_dist = pinch_dist
+        else:
+            region.smoothed_pinch_dist = (
+                smoothing_alpha * pinch_dist + (1 - smoothing_alpha) * region.smoothed_pinch_dist
+            )
+        smooth_dist = region.smoothed_pinch_dist
+
+        # Initialize state if it doesn't exist
+        if not hasattr(region, 'pinch_state'):
+            region.pinch_state = {'active': False, 'last_dist': smooth_dist, 'last_change_time': 0}
+
+        state = region.pinch_state
+        current_time = time.time()
+
+        start_thresh = params.get('pinch_threshold_start', 0.28)  # Increased threshold
+        stop_thresh = params.get('pinch_threshold_stop', 0.32)    # Increased threshold
+
+        if state['active']:
+            if smooth_dist > stop_thresh:
+                state['active'] = False
+                state['last_dist'] = smooth_dist
+                return
+
+            if current_time - state['last_change_time'] < params.get('volume_change_cooldown', 0.05):
+                return
+
+            dist_change = smooth_dist - state['last_dist']
+            sensitivity = params.get('volume_sensitivity', 1.5)
+            volume_change = dist_change * 100 * sensitivity
+
+            if abs(volume_change) > 0.1:
+                from volume_controller import get_volume_controller
+                vc = get_volume_controller()
+                if vc.is_valid:
+                    vc.change_volume(volume_change)
+                    state['last_change_time'] = current_time
+
+        else:
+            if smooth_dist < start_thresh:
+                state['active'] = True
+                print(f"🤏 Pinch gesture activated on {region.hand_type} hand.")
+
+        state['last_dist'] = smooth_dist
 
     def _handle_browser_mode_iloveyou(self, region):
         """ILoveYou gesture logic updated for dataclass attribute access."""

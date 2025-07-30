@@ -37,6 +37,13 @@ class ControlSystemConfig:
     cursor_sensitivity: float = 2.5
     screen_width: int = 1920
     screen_height: int = 1080
+
+    enable_volume_control: bool = True
+    volume_control_hand: str = 'any'
+    volume_sensitivity: float = 1.5
+    pinch_threshold_start: float = 0.1
+    pinch_threshold_stop: float = 0.15
+    volume_change_cooldown: float = 0.05
     
     enable_scroll_control: bool = False
     scroll_sensitivity: int = 6
@@ -141,7 +148,7 @@ class ApplicationModesConfig:
     browser_mode: ApplicationModeConfig = field(default_factory=lambda: ApplicationModeConfig(name='Browser Mode'))
     
     game_mode: Optional[ApplicationModeConfig] = None
-    
+    volume_mode: ApplicationModeConfig = field(default_factory=lambda: ApplicationModeConfig(name='Volume Control Mode')) 
     # Browser mode specific
     browser_right_hand_mode: str = 'cursor'  # 'cursor' or 'scroll'
     # --- FIX: Declare missing browser-specific attributes ---
