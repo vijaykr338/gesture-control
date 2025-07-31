@@ -11,7 +11,7 @@ from PyQt6.QtCore import Qt, QSize, QThread, QPoint, QRect, QMargins, pyqtSignal
 from typing import Optional
 from gui_worker import GestureEngineWorker
 from config_manager import config_manager, ApplicationModeConfig, ApplicationModeGesture
-
+from benchmark_dialog import BenchmarkDialog
 
 def get_gesture_display_name(gesture_key):
     """Returns a user-friendly display name for a given gesture key."""
@@ -1162,6 +1162,7 @@ class GestureDashboard(QMainWindow):
         self.gesture_widgets = {}
         self.mode_tags_group = QButtonGroup()
         self.popout_window = None
+        
 
         self.apply_stylesheet()
         self.setup_ui()
@@ -1358,42 +1359,61 @@ class GestureDashboard(QMainWindow):
         return frame
 
     def create_engine_controls(self):
-        group = QGroupBox("System Controls")
+        """Create engine control buttons and mode selector."""
+        group = QGroupBox("Engine Controls")
         layout = QGridLayout(group)
         layout.setSpacing(10)
-        
+
         self.start_btn = QPushButton(" Start Engine")
-        self.start_btn.setObjectName("StartBtn")
         self.start_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
         self.start_btn.clicked.connect(self.start_engine)
-        
+
         self.stop_btn = QPushButton(" Stop Engine")
-        self.stop_btn.setObjectName("StopBtn")
         self.stop_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaStop))
-        self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_engine)
-        
-        self.pause_btn = QPushButton(" Pause")
+        self.stop_btn.setEnabled(False)
+
+        self.pause_btn = QPushButton(" Pause Engine")
         self.pause_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
-        self.pause_btn.setEnabled(False)
+        self.pause_btn.setCheckable(True)
         self.pause_btn.clicked.connect(self.pause_resume_engine)
-        
+        self.pause_btn.setEnabled(False)
+
         self.settings_btn = QPushButton(" Settings")
         self.settings_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
         self.settings_btn.clicked.connect(self.open_settings_dialog)
 
-        self.mode_combo = NoArrowKeyComboBox()
-        self.update_mode_combo()
+        # --- ADD THE BENCHMARK BUTTON HERE ---
+        self.benchmark_btn = QPushButton("🔬 Benchmark Studio")
+        self.benchmark_btn.clicked.connect(self.open_benchmark_studio)
+        # --- END OF ADDITION ---
+
+# --- FIX: Mode Selection Combo ---
+        mode_label = QLabel("Mode:")
+        self.mode_combo = QComboBox()
+        self.update_mode_combo()  # Use the method that loads from config
         self.mode_combo.currentTextChanged.connect(self.change_mode)
+        # --- END OF FIX ---
         
+        layout.addWidget(mode_label, 3, 0)
+        layout.addWidget(self.mode_combo, 3, 1)
+
         layout.addWidget(self.start_btn, 0, 0)
         layout.addWidget(self.stop_btn, 0, 1)
         layout.addWidget(self.pause_btn, 1, 0)
         layout.addWidget(self.settings_btn, 1, 1)
-        layout.addWidget(QLabel("Active Mode:"), 2, 0)
-        layout.addWidget(self.mode_combo, 2, 1)
-        
+        layout.addWidget(self.benchmark_btn, 2, 0, 1, 2)  # Add button to the grid
+
         return group
+
+    def open_benchmark_studio(self):
+        """Opens the benchmark dialog."""
+        # It's good practice to pause the main engine to free up resources
+        if hasattr(self, 'worker_thread') and self.worker_thread and self.worker_thread.isRunning() and not self.pause_btn.isChecked():
+            self.pause_btn.click()  # Programmatically click the pause button
+
+        dialog = BenchmarkDialog(self)
+        dialog.exec()
 
     def open_settings_dialog(self):
         """Open the settings dialog."""

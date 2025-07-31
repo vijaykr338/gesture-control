@@ -11,6 +11,13 @@ class DetectionConfig:
     input_size: int = 192
     score_threshold: float = 0.75
     nms_threshold: float = 0.3
+    num_hands: int = 2
+    enable_dynamic_box_expansion: bool = True
+    dynamic_box_expansion_margin: float = 0.2
+    dynamic_box_expansion_factor: float = 1.15
+    dynamic_box_shrink_factor: float = 0.99
+    dynamic_box_default_scale: float = 2.6
+    dynamic_box_max_scale: float = 4.0
     smoothing_alpha: float = 0.8
     iou_match_threshold: float = 0.3
     detection_smoothing_alpha: float = 0.7

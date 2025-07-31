@@ -15,6 +15,7 @@ from hand_landmark import *
 from application_modes import ApplicationModeManager
 import pyautogui
 from game_controller import get_game_controller
+import time
 
 
 class CompleteGestureEngine:
@@ -147,6 +148,61 @@ class CompleteGestureEngine:
             self.cap = None
         self.event_bus.stop_processing()
         print("⏹️ Complete Engine stopped!")
+
+    def process_single_frame_benchmark(self, frame: np.ndarray):
+        """
+        Processes a single frame for benchmarking, returning the annotated frame and performance timings.
+        This method does NOT use the camera and does NOT trigger application mode actions.
+        """
+        timings = {}
+        overall_start_time = time.perf_counter()
+        
+        try:
+            original_frame = frame.copy()
+            frame_h, frame_w = original_frame.shape[:2]
+            resized_frame_for_input = cv2.resize(frame, (self.params['input_size'], self.params['input_size']))
+
+            # --- Palm Detection ---
+            pd_start_time = time.perf_counter()
+            # For benchmark, we can simplify the state machine or just run detection
+            need_palm_detection = self.params.get('always_run_palm_detection', True)
+            
+            current_regions_for_processing = []
+            if need_palm_detection:
+                regions_nms = self._run_palm_detection(resized_frame_for_input)
+                self._smooth_detection_boxes(regions_nms)
+                current_regions_for_processing = regions_nms
+            else:
+                # In a real tracking benchmark, we'd use previous regions.
+                # For simplicity here, we just run palm detection if not forced.
+                regions_nms = self._run_palm_detection(resized_frame_for_input)
+                current_regions_for_processing = regions_nms
+
+            timings['palm_detection_inference_ms'] = (time.perf_counter() - pd_start_time) * 1000
+
+            if current_regions_for_processing:
+                detections_to_rect(current_regions_for_processing)
+                rect_transformation(current_regions_for_processing, self.params['input_size'], self.params['input_size'])
+            
+            # --- Landmark Processing ---
+            lm_start_time = time.perf_counter()
+            processed_regions = self._process_landmarks_and_gestures(current_regions_for_processing, resized_frame_for_input)
+            timings['landmark_inference_ms'] = (time.perf_counter() - lm_start_time) * 1000
+            
+            # --- Rendering (for visual feedback) ---
+            self._render_results_complete(original_frame, processed_regions, frame_w, frame_h)
+            
+            # Update previous regions for the next frame in the benchmark sequence
+            self.params['previous_frame_processed_regions'] = list(processed_regions)
+            
+            timings['total_engine_time_ms'] = (time.perf_counter() - overall_start_time) * 1000
+            
+            return original_frame, timings
+
+        except Exception as e:
+            print(f"Error in benchmark frame processing: {e}")
+            return frame, {'error': str(e)}
+
     
     def get_frame_with_complete_processing(self):
         """Get frame with COMPLETE processing and rendering exactly like your notebook"""

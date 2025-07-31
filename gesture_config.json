@@ -3,6 +3,13 @@
         "input_size": 192,
         "score_threshold": 0.5,
         "nms_threshold": 0.3,
+        "num_hands": 2,
+        "enable_dynamic_box_expansion": true,
+        "dynamic_box_expansion_margin": 0.2,
+        "dynamic_box_expansion_factor": 1.15,
+        "dynamic_box_shrink_factor": 0.99,
+        "dynamic_box_default_scale": 2.6,
+        "dynamic_box_max_scale": 4.0,
         "smoothing_alpha": 0.6,
         "iou_match_threshold": 0.3,
         "detection_smoothing_alpha": 0.6,
@@ -25,23 +32,23 @@
         "cursor_sensitivity": 2.5,
         "screen_width": 1920,
         "screen_height": 1080,
-        "enable_scroll_control": false,
-        "scroll_sensitivity": 6,
-        "scroll_threshold": 0.1,
-        "scroll_smoothing": 0.6,
-        "scroll_hand_preference": "any",
         "enable_volume_control": true,
         "volume_control_hand": "any",
         "volume_sensitivity": 1.5,
         "pinch_threshold_start": 0.1,
         "pinch_threshold_stop": 0.15,
         "volume_change_cooldown": 0.05,
+        "enable_scroll_control": false,
+        "scroll_sensitivity": 6,
+        "scroll_threshold": 0.1,
+        "scroll_smoothing": 0.6,
+        "scroll_hand_preference": "any",
         "enable_key_control": false,
         "key_press_cooldown": 0.6,
         "enable_game_control": true,
         "game_control_type": "keyboard",
-        "steering_box_width": 0.09999999999999999,
-        "steering_box_height": 0.09999999999999999,
+        "steering_box_width": 0.1,
+        "steering_box_height": 0.1,
         "steering_box_x": 0.01,
         "steering_box_y": 0.25,
         "steering_sensitivity": 0.7,
@@ -208,19 +215,14 @@
     "app_modes": {
         "current_mode": "disabled",
         "mode_switch_cooldown": 2.0,
-        "last_mode_switch": 1752128780.4360123,
+        "last_mode_switch": 1753989537.0624354,
         "debug_mode": true,
         "gesture_timings": {
             "left_index_bent": 1752128772.412356,
-            "left_index_middle_bent": 1752128753.569075,
+            "left_index_middle_bent": 1753989537.529223,
             "right_index_bent": 1752128569.8502388,
             "right_index_middle_bent": 1752128557.6661174,
             "fist_gesture": 1752101498.7455697
-        },
-        "volume_mode": {
-            "name": "Volume Control Mode",
-            "enabled": false,
-            "gestures": {}
         },
         "ppt_mode": {
             "name": "PowerPoint Mode",
@@ -292,7 +294,7 @@
         },
         "browser_mode": {
             "name": "Browser Mode",
-            "enabled": false,
+            "enabled": true,
             "gestures": {
                 "left_index_bent": {
                     "action": "mouse_click",
@@ -336,6 +338,11 @@
                     "cooldown": 0.3
                 }
             }
+        },
+        "volume_mode": {
+            "name": "Volume Control Mode",
+            "enabled": false,
+            "gestures": {}
         },
         "browser_right_hand_mode": "cursor",
         "browser_iloveyou_switch_cooldown": 1.0,

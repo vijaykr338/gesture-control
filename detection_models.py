@@ -14,6 +14,18 @@ class ModelManager:
         self.compiled_models = {}
         self._lock = threading.Lock()
         self._initialized = False
+        self.device = "CPU"  # Default device
+
+    def set_device(self, device: str):
+        """Set the inference device"""
+        available_devices = self.core.available_devices
+        if device in available_devices or device in ["AUTO", "CPU"]:
+            self.device = device
+            print(f"✅ Inference device set to: {device}")
+            return True
+        else:
+            print(f"❌ Device {device} not available. Available devices: {available_devices}")
+            return False
     
     def initialize_models(self, model_paths: dict) -> bool:
         """Initialize all required models"""
@@ -38,7 +50,7 @@ class ModelManager:
                     self._load_gesture_classifier(model_paths['gesture_classifier'])
                 
                 self._initialized = True
-                print("✅ All models initialized successfully")
+                print(f"✅ All models initialized successfully on device: {self.device}")
                 return True
                 
             except Exception as e:
@@ -66,7 +78,7 @@ class ModelManager:
             .scale([255.0, 255.0, 255.0])
         
         palm_detection_model = ppp_pd.build()
-        compiled_model = self.core.compile_model(palm_detection_model, "CPU")
+        compiled_model = self.core.compile_model(palm_detection_model, self.device)
         
         self.models['palm_detection'] = palm_detection_model
         self.compiled_models['palm_detection'] = compiled_model
@@ -74,7 +86,7 @@ class ModelManager:
     def _load_landmark_model(self, model_path: str):
         """Load landmark detection model"""
         model = self.core.read_model(model_path)
-        compiled_model = self.core.compile_model(model, "CPU")
+        compiled_model = self.core.compile_model(model, self.device)
         
         self.models['hand_landmarks'] = model
         self.compiled_models['hand_landmarks'] = compiled_model
@@ -82,7 +94,7 @@ class ModelManager:
     def _load_gesture_embedder(self, model_path: str):
         """Load gesture embedding model"""
         model = self.core.read_model(model_path)
-        compiled_model = self.core.compile_model(model, "CPU")
+        compiled_model = self.core.compile_model(model, self.device)
         
         self.models['gesture_embedder'] = model
         self.compiled_models['gesture_embedder'] = compiled_model
@@ -90,7 +102,7 @@ class ModelManager:
     def _load_gesture_classifier(self, model_path: str):
         """Load gesture classification model"""
         model = self.core.read_model(model_path)
-        compiled_model = self.core.compile_model(model, "CPU")
+        compiled_model = self.core.compile_model(model, self.device)
         
         self.models['gesture_classifier'] = model
         self.compiled_models['gesture_classifier'] = compiled_model
@@ -110,7 +122,9 @@ class ModelManager:
             return {
                 'initialized': self._initialized,
                 'available_models': list(self.compiled_models.keys()),
-                'model_count': len(self.compiled_models)
+                'model_count': len(self.compiled_models),
+                'device': self.device,
+                'available_devices': self.core.available_devices
             }
 
 # Global model manager instance
