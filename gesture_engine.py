@@ -45,7 +45,7 @@ class CompleteGestureEngine:
         self.anchors2_np = None
         self.app_mode_manager = None
         
-    def initialize(self) -> bool:
+    def initialize(self, benchmark_mode: bool = False) -> bool:
         """Initialize the complete gesture engine"""
         print("🔧 Initializing Complete Gesture Engine...")
         
@@ -60,12 +60,9 @@ class CompleteGestureEngine:
         self.app_modes = self.params['app_modes']
         self.app_mode_manager = ApplicationModeManager(self.app_modes)
         self.app_mode_manager.set_engine_params(self.params)
-        pyautogui.FAILSAFE = True  # Move mouse to corner to stop
-        pyautogui.PAUSE = 0.0 
         
         # Initialize models
         model_paths = {
-            # BUG FIX 2: Corrected the path for the palm detection model
             'palm_detection': 'mediapipeModels/hand_detector.xml',
             'hand_landmarks': 'mediapipeModels/hand_landmarks_detector.xml',
             'gesture_embedder': 'mediapipeModels/gesture_embedder.xml',
@@ -76,32 +73,39 @@ class CompleteGestureEngine:
             print("❌ Model initialization failed!")
             return False
         
-        # Initialize camera with better handling
-        self.cap = None
-        for camera_id in [0, 1, -1]:  # Try different camera indices
-            try:
-                test_cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
-                if test_cap.isOpened():
-                    # Test if we can actually read frames
-                    ret, test_frame = test_cap.read()
-                    if ret and test_frame is not None:
-                        print(f"✅ Camera {camera_id} working!")
-                        # Set optimal properties
-                        test_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                        test_cap.set(cv2.CAP_PROP_FPS, 30)
-                        self.cap = test_cap
-                        break
+        # --- FIX: Skip camera initialization in benchmark mode ---
+        if not benchmark_mode:
+            # Initialize camera with better handling (only for normal mode)
+            self.cap = None
+            for camera_id in [0, 1, -1]:  # Try different camera indices
+                try:
+                    test_cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
+                    if test_cap.isOpened():
+                        # Test if we can actually read frames
+                        ret, test_frame = test_cap.read()
+                        if ret and test_frame is not None:
+                            print(f"✅ Camera {camera_id} working!")
+                            # Set optimal properties
+                            test_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                            test_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                            test_cap.set(cv2.CAP_PROP_FPS, 30)
+                            self.cap = test_cap
+                            break
+                        else:
+                            test_cap.release()
                     else:
                         test_cap.release()
-                else:
-                    test_cap.release()
-            except Exception as e:
-                print(f"Camera {camera_id} error: {e}")
-                continue
-        
-        if not self.cap or not self.cap.isOpened():
-            print("❌ Camera initialization failed!")
-            return False
+                except Exception as e:
+                    print(f"Camera {camera_id} error: {e}")
+                    continue
+            
+            if not self.cap or not self.cap.isOpened():
+                print("❌ Camera initialization failed!")
+                return False
+        else:
+            print("🔧 Benchmark mode: Skipping camera initialization")
+            self.cap = None
+        # --- END OF FIX ---
         
         # Generate anchors
         anchors2 = generate_anchors(options)

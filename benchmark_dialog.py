@@ -39,9 +39,11 @@ class BenchmarkWorker(QThread):
                 engine.model_manager.device = self.config['inference_device']
                 print(f"🔧 Using inference device: {self.config['inference_device']}")
             
-            if not engine.initialize():
+            # --- FIX: Initialize in benchmark mode (no camera) ---
+            if not engine.initialize(benchmark_mode=True):
                 self.benchmark_finished.emit({'error': 'Benchmark engine failed to initialize.'})
                 return
+            # --- END OF FIX ---
 
             # --- FIX: Initialize psutil and get CPU core count ---
             process = psutil.Process(os.getpid())
@@ -53,6 +55,7 @@ class BenchmarkWorker(QThread):
             is_video = any(source_path.lower().endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.mkv'])
             
             all_metrics = []
+            
             
             if is_video:
                 cap = cv2.VideoCapture(source_path)
