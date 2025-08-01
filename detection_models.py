@@ -17,15 +17,22 @@ class ModelManager:
         self.device = "CPU"  # Default device
 
     def set_device(self, device: str):
-        """Set the inference device"""
+        """Set the inference device and handle recompilation if necessary."""
         available_devices = self.core.available_devices
-        if device in available_devices or device in ["AUTO", "CPU"]:
-            self.device = device
-            print(f"✅ Inference device set to: {device}")
-            return True
-        else:
-            print(f"❌ Device {device} not available. Available devices: {available_devices}")
+        if device not in available_devices and device not in ["AUTO", "CPU"]:
+            print(f"❌ Device '{device}' not available. Available: {available_devices}")
             return False
+
+        # If the device is new and models are already loaded, we need to re-initialize.
+        if self._initialized and self.device != device:
+            print(f"🔄 Device changed from '{self.device}' to '{device}'. Re-initializing models.")
+            self.device = device
+            self._initialized = False # Force re-initialization
+        else:
+            self.device = device
+        
+        print(f"✅ Inference device set to: {self.device}")
+        return True
     
     def initialize_models(self, model_paths: dict) -> bool:
         """Initialize all required models"""

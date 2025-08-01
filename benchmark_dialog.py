@@ -34,11 +34,9 @@ class BenchmarkWorker(QThread):
             # Create a dedicated engine instance for the benchmark
             engine = CompleteGestureEngine()
             
-            # --- FIX: Set device BEFORE setting engine params ---
+            # --- FIX: Set device using the proper method BEFORE initialization ---
             if 'inference_device' in self.config:
-                engine.model_manager.device = self.config['inference_device']
-                print(f"🔧 Using inference device: {self.config['inference_device']}")
-            # --- END OF FIX ---
+                engine.model_manager.set_device(self.config['inference_device'])
             
             engine.params = self.config['engine_params']
             
