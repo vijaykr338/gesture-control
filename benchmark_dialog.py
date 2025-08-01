@@ -187,8 +187,30 @@ class BenchmarkDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("🔬 Benchmark Studio")
-        # Make it fullscreen
-        self.showMaximized()
+        
+        # --- FIX: Responsive window sizing for different screen sizes ---
+        # Get screen geometry
+        from PyQt6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen().availableGeometry()
+        screen_width = screen.width()
+        screen_height = screen.height()
+        
+        # Calculate appropriate window size (80% of screen, with min/max limits)
+        window_width = max(1200, min(1600, int(screen_width * 0.8)))
+        window_height = max(800, min(1000, int(screen_height * 0.8)))
+        
+        # Set window size and make it resizable
+        self.resize(window_width, window_height)
+        self.setMinimumSize(1000, 700)  # Minimum usable size
+        
+        # Center the window on screen
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        self.move(x, y)
+        
+        # Remove showMaximized() - this was causing the oversized window
+        # --- END OF FIX ---
+        
         self.worker = None
         self.final_report = {}
         self.source_path = ""
@@ -197,12 +219,15 @@ class BenchmarkDialog(QDialog):
 
     def setup_ui(self):
         main_layout = QHBoxLayout(self)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(10, 10, 10, 10)
         
-        # --- Left Panel: Configuration ---
+        # --- Left Panel: Configuration (Make responsive) ---
         config_panel = QFrame()
-        config_panel.setFixedWidth(350)  # Slightly wider
+        config_panel.setFixedWidth(320)  # Reduced from 350
         config_panel.setFrameShape(QFrame.Shape.StyledPanel)
         config_layout = QVBoxLayout(config_panel)
+        config_layout.setSpacing(8)
         
         # Input Source
         input_group = QGroupBox("Input Source")
@@ -234,9 +259,8 @@ class BenchmarkDialog(QDialog):
         
         # Device selection
         self.device_combo = QComboBox()
-        self.device_combo.addItems(["CPU", "AUTO"])  # Add GPU options if available
+        self.device_combo.addItems(["CPU", "AUTO"])
         try:
-            # Try to detect available devices
             import openvino as ov
             core = ov.Core()
             available_devices = core.available_devices
@@ -266,8 +290,8 @@ class BenchmarkDialog(QDialog):
         
         self.image_display_label = QLabel("Image Display Time: 2.0s")
         self.image_display_slider = QSlider(Qt.Orientation.Horizontal)
-        self.image_display_slider.setRange(5, 100)  # 0.5s to 10.0s
-        self.image_display_slider.setValue(20)  # 2.0s
+        self.image_display_slider.setRange(5, 100)
+        self.image_display_slider.setValue(20)
         self.image_display_slider.valueChanged.connect(
             lambda v: self.image_display_label.setText(f"Image Display Time: {v/10:.1f}s")
         )
@@ -277,18 +301,18 @@ class BenchmarkDialog(QDialog):
         timing_layout.addWidget(self.image_display_slider, 2, 0, 1, 2)
         timing_group.setLayout(timing_layout)
 
-        # Control Buttons
+        # Control Buttons (Smaller)
         self.start_btn = QPushButton("▶️ START TEST")
         self.start_btn.setEnabled(False)
-        self.start_btn.setMinimumHeight(40)
+        self.start_btn.setMinimumHeight(35)  # Reduced from 40
         
         self.stop_btn = QPushButton("⏹️ STOP TEST")
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setMinimumHeight(40)
+        self.stop_btn.setMinimumHeight(35)
         
         self.export_btn = QPushButton("💾 EXPORT RESULTS")
         self.export_btn.setEnabled(False)
-        self.export_btn.setMinimumHeight(40)
+        self.export_btn.setMinimumHeight(35)
 
         config_layout.addWidget(input_group)
         config_layout.addWidget(params_group)
@@ -298,18 +322,30 @@ class BenchmarkDialog(QDialog):
         config_layout.addWidget(self.stop_btn)
         config_layout.addWidget(self.export_btn)
 
-        # --- Center Panel: Visualizer ---
+        # --- Center Panel: Visualizer (Responsive) ---
         center_panel = QFrame()
         center_panel.setFrameShape(QFrame.Shape.StyledPanel)
         center_layout = QVBoxLayout(center_panel)
+        center_layout.setSpacing(8)
         
+        # --- FIX: Responsive visualizer sizing ---
         self.visualizer_label = QLabel("Visualizer will appear here.")
         self.visualizer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.visualizer_label.setMinimumSize(800, 600)  # Larger minimum size
-        self.visualizer_label.setStyleSheet("background-color: #1e1e1e; border: 1px solid #3e3e42;")
+        self.visualizer_label.setMinimumSize(480, 360)  # Smaller minimum size
+        self.visualizer_label.setScaledContents(False)
+        self.visualizer_label.setStyleSheet("""
+            QLabel {
+                background-color: #1e1e1e; 
+                border: 1px solid #3e3e42;
+                border-radius: 4px;
+                color: #cccccc;
+                font-size: 12px;
+            }
+        """)
+        # --- END OF FIX ---
         
         self.progress_bar = QProgressBar()
-        self.progress_bar.setMinimumHeight(25)
+        self.progress_bar.setMinimumHeight(20)  # Reduced from 25
         
         self.progress_label = QLabel("Idle")
         self.progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -318,39 +354,40 @@ class BenchmarkDialog(QDialog):
         center_layout.addWidget(self.progress_bar)
         center_layout.addWidget(self.progress_label)
 
-        # --- Right Panel: Results ---
+        # --- Right Panel: Results (Responsive) ---
         results_panel = QFrame()
-        results_panel.setFixedWidth(400)  # Wider for better results display
+        results_panel.setFixedWidth(340)  # Reduced from 400
         results_panel.setFrameShape(QFrame.Shape.StyledPanel)
         results_layout = QVBoxLayout(results_panel)
+        results_layout.setSpacing(8)
         
-        # System Info
+        # System Info (Compact)
         sys_info_group = QGroupBox("System Information")
         sys_info_layout = QVBoxLayout()
         try:
             import cpuinfo
-            cpu = cpuinfo.get_cpu_info()['brand_raw']
+            cpu = cpuinfo.get_cpu_info()['brand_raw'][:30] + "..." if len(cpuinfo.get_cpu_info()['brand_raw']) > 30 else cpuinfo.get_cpu_info()['brand_raw']
         except Exception: 
             cpu = "N/A"
         ram = f"{psutil.virtual_memory().total / (1024**3):.1f} GB"
         
+        # Use smaller font for system info
         sys_info_layout.addWidget(QLabel(f"<b>CPU:</b> {cpu}"))
         sys_info_layout.addWidget(QLabel(f"<b>RAM:</b> {ram}"))
         sys_info_layout.addWidget(QLabel(f"<b>OS:</b> {platform.system()} {platform.release()}"))
         sys_info_group.setLayout(sys_info_layout)
 
-        # Results Display
+        # Results Display (Compact)
         results_group = QGroupBox("Benchmark Results")
         results_group_layout = QVBoxLayout(results_group)
         
-        # Use QTextEdit for better formatting and scrolling
         self.results_text = QTextEdit()
         self.results_text.setReadOnly(True)
         self.results_text.setPlainText("Run a test to see detailed results here.")
-        self.results_text.setMinimumHeight(300)
+        self.results_text.setMinimumHeight(200)  # Reduced from 300
         
-        # Set monospace font for better alignment
-        font = QFont("Consolas", 9)
+        # Use smaller monospace font
+        font = QFont("Consolas", 8)  # Reduced from 9
         font.setStyleHint(QFont.StyleHint.Monospace)
         self.results_text.setFont(font)
         
@@ -362,6 +399,77 @@ class BenchmarkDialog(QDialog):
         main_layout.addWidget(config_panel)
         main_layout.addWidget(center_panel, 1)
         main_layout.addWidget(results_panel)
+
+    # --- FIX: Add method to handle window resizing ---
+    def resizeEvent(self, event):
+        """Handle window resize events to keep UI responsive"""
+        super().resizeEvent(event)
+        
+        # Update visualizer scaling when window is resized
+        if hasattr(self, 'visualizer_label') and self.visualizer_label.pixmap():
+            # Force refresh of the displayed frame with new size
+            pixmap = self.visualizer_label.pixmap()
+            if pixmap:
+                scaled_pixmap = pixmap.scaled(
+                    self.visualizer_label.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.visualizer_label.setPixmap(scaled_pixmap)
+    # --- END OF FIX ---
+
+    def update_frame(self, frame, metrics):
+        try:
+            # Check if frame is valid
+            if frame is None or frame.size == 0:
+                print("Warning: Received null or empty frame")
+                return
+            
+            rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb_image.shape
+            
+            # Validate image dimensions
+            if h <= 0 or w <= 0 or ch <= 0:
+                print(f"Warning: Invalid image dimensions: {w}x{h}x{ch}")
+                return
+            
+            qt_image = QImage(rgb_image.data, w, h, ch * w, QImage.Format.Format_RGB888)
+            
+            # Check if QImage was created successfully
+            if qt_image.isNull():
+                print("Warning: Failed to create QImage from frame data")
+                return
+            
+            # Create pixmap and check if valid
+            pixmap = QPixmap.fromImage(qt_image)
+            if pixmap.isNull():
+                print("Warning: Failed to create QPixmap from QImage")
+                return
+            
+            # Get available size and validate
+            available_size = self.visualizer_label.size()
+            if available_size.width() <= 0 or available_size.height() <= 0:
+                print(f"Warning: Invalid label size: {available_size.width()}x{available_size.height()}")
+                return
+            
+            # Scale the pixmap safely
+            scaled_pixmap = pixmap.scaled(
+                available_size, 
+                Qt.AspectRatioMode.KeepAspectRatio, 
+                Qt.TransformationMode.SmoothTransformation
+            )
+            
+            # Final check before setting
+            if not scaled_pixmap.isNull():
+                self.visualizer_label.setPixmap(scaled_pixmap)
+            else:
+                print("Warning: Scaled pixmap is null")
+                
+        except Exception as e:
+            print(f"Error in update_frame: {e}")
+            import traceback
+            traceback.print_exc()
+
 
     def connect_signals(self):
         self.browse_folder_btn.clicked.connect(lambda: self.browse_source(is_folder=True))
