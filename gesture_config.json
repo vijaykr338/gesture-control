@@ -215,7 +215,7 @@
     "app_modes": {
         "current_mode": "disabled",
         "mode_switch_cooldown": 2.0,
-        "last_mode_switch": 1753989537.0624354,
+        "last_mode_switch": 1754032817.6326895,
         "debug_mode": true,
         "gesture_timings": {
             "left_index_bent": 1752128772.412356,
@@ -341,7 +341,7 @@
         },
         "volume_mode": {
             "name": "Volume Control Mode",
-            "enabled": false,
+            "enabled": true,
             "gestures": {}
         },
         "browser_right_hand_mode": "cursor",

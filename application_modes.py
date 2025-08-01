@@ -206,6 +206,8 @@ class ApplicationModeManager:
         index_tip = np.array(region.landmarks[8][:2])
         pinch_dist = np.linalg.norm(thumb_tip - index_tip)
 
+        
+
         # --- Smoothing ---
         smoothing_alpha = 0.5  # 0.0 = no smoothing, 1.0 = max smoothing
         if not hasattr(region, 'smoothed_pinch_dist'):

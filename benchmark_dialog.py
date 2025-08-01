@@ -202,13 +202,17 @@ class BenchmarkDialog(QDialog):
         screen_width = screen.width()
         screen_height = screen.height()
         
-        # Calculate appropriate window size (80% of screen, with min/max limits)
-        window_width = max(1200, min(1600, int(screen_width * 0.8)))
-        window_height = max(800, min(1000, int(screen_height * 0.8)))
+        # Calculate window size: 80% width (10% margin each side), 60% height (20% margin top/bottom)
+        window_width = int(screen_width * 0.8)   
+        window_height = int(screen_height * 0.6)  
         
-        # Set window size and make it resizable
+        # Remove conflicting constraints - just set reasonable minimums
+        window_width = max(1000, window_width)   # Minimum 800px width
+        window_height = max(700, window_height) # Minimum 500px height
+        
+        # Set the calculated size
         self.resize(window_width, window_height)
-        self.setMinimumSize(1000, 700)  # Minimum usable size
+        self.setMinimumSize(1000, 700) 
         
         # Center the window on screen
         x = (screen_width - window_width) // 2
