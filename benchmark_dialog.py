@@ -33,11 +33,14 @@ class BenchmarkWorker(QThread):
         try:
             # Create a dedicated engine instance for the benchmark
             engine = CompleteGestureEngine()
-            engine.params = self.config['engine_params']
             
+            # --- FIX: Set device BEFORE setting engine params ---
             if 'inference_device' in self.config:
                 engine.model_manager.device = self.config['inference_device']
                 print(f"🔧 Using inference device: {self.config['inference_device']}")
+            # --- END OF FIX ---
+            
+            engine.params = self.config['engine_params']
             
             # --- FIX: Initialize in benchmark mode (no camera) ---
             if not engine.initialize(benchmark_mode=True):
