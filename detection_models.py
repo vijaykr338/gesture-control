@@ -71,6 +71,12 @@ class ModelManager:
         
         model = self.core.read_model(model_path)
         
+
+        # --- FIX: Apply model surgery if targeting NPU ---
+        if "NPU" in self.device:
+            model = self._replace_maximum_with_fallback(model)
+        # --- END OF FIX ---
+
         # Apply preprocessing
         ppp_pd = PrePostProcessor(model)
         ppp_pd.input().tensor() \
@@ -93,6 +99,13 @@ class ModelManager:
     def _load_landmark_model(self, model_path: str):
         """Load landmark detection model"""
         model = self.core.read_model(model_path)
+
+        # --- FIX: Apply model surgery if targeting NPU ---
+        if "NPU" in self.device:
+            model = self._replace_maximum_with_fallback(model)
+        # --- END OF FIX ---
+
+
         compiled_model = self.core.compile_model(model, self.device)
         
         self.models['hand_landmarks'] = model
@@ -101,6 +114,12 @@ class ModelManager:
     def _load_gesture_embedder(self, model_path: str):
         """Load gesture embedding model"""
         model = self.core.read_model(model_path)
+
+        # --- FIX: Apply model surgery if targeting NPU ---
+        if "NPU" in self.device:
+            model = self._replace_maximum_with_fallback(model)
+        # --- END OF FIX ---
+
         compiled_model = self.core.compile_model(model, self.device)
         
         self.models['gesture_embedder'] = model
@@ -109,6 +128,12 @@ class ModelManager:
     def _load_gesture_classifier(self, model_path: str):
         """Load gesture classification model"""
         model = self.core.read_model(model_path)
+
+        # --- FIX: Apply model surgery if targeting NPU ---
+        if "NPU" in self.device:
+            model = self._replace_maximum_with_fallback(model)
+        # --- END OF FIX ---
+
         compiled_model = self.core.compile_model(model, self.device)
         
         self.models['gesture_classifier'] = model
