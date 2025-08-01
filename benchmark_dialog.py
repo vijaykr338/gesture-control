@@ -32,51 +32,7 @@ class BenchmarkWorker(QThread):
         self.config = config
         self.is_running = True
 
-    def _replace_maximum_with_fallback(self, model: Model) -> Model:
-        """
-        Finds all 'Maximum' nodes in the model and replaces them with a
-        mathematically equivalent subgraph of simpler operations that are
-        more likely to be supported by accelerators like NPUs.
-        
-        Replacement formula: Maximum(a, b) = (a + b + abs(a - b)) / 2
-        """
-        try:
-            nodes_to_replace = []
-            for node in model.get_ops():
-                if node.get_type_name() == "Maximum":
-                    nodes_to_replace.append(node)
-            
-            if not nodes_to_replace:
-                return model # No changes needed
-
-            print(f"🔧 Performing model surgery: Found {len(nodes_to_replace)} 'Maximum' nodes to replace for NPU compatibility.")
-
-            for max_node in nodes_to_replace:
-                # Get the two inputs to the Maximum node
-                input_a = max_node.input_value(0)
-                input_b = max_node.input_value(1)
-                
-                # Create the subgraph for (a + b + abs(a - b)) / 2
-                add_node = opset.add(input_a, input_b, name=f"{max_node.get_friendly_name()}_add")
-                subtract_node = opset.subtract(input_a, input_b, name=f"{max_node.get_friendly_name()}_sub")
-                abs_node = opset.abs(subtract_node, name=f"{max_node.get_friendly_name()}_abs")
-                add_abs_node = opset.add(add_node, abs_node, name=f"{max_node.get_friendly_name()}_add_abs")
-                
-                # Create the constant for division by 2
-                divisor = opset.constant(np.array(2.0, dtype=np.float32), name=f"{max_node.get_friendly_name()}_divisor")
-                divide_node = opset.divide(add_abs_node, divisor, name=f"{max_node.get_friendly_name()}_div")
-                
-                # Replace the original Maximum node's output with our new subgraph's output
-                max_node.output(0).replace(divide_node.output(0))
-                print(f"  ✅ Replaced node: {max_node.get_friendly_name()}")
-
-            # Re-validate and create a new model from the modified graph
-            new_model = Model(model.get_results(), model.get_parameters(), "repaired_model")
-            return new_model
-
-        except Exception as e:
-            print(f"❌ Error during model surgery: {e}. Returning original model.")
-            return model
+    
 
     def run(self):
         try:
