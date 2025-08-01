@@ -168,8 +168,17 @@ class CompleteGestureEngine:
 
             # --- Palm Detection ---
             pd_start_time = time.perf_counter()
-            # For benchmark, we can simplify the state machine or just run detection
-            need_palm_detection = self.params.get('always_run_palm_detection', True)
+            
+            # --- FIX: Use a more robust check for when to run palm detection ---
+            # Palm detection is needed if the 'always run' flag is set, OR if tracking
+            # is unstable (i.e., should_run_palm_detection returns True).
+            always_run = self.params.get('always_run_palm_detection', False)
+            tracking_requires_detection = should_run_palm_detection(
+                self.params.get('previous_frame_processed_regions', []),
+                self.params.get('landmark_score_for_palm_redetection_threshold', 0.7)
+            )
+            need_palm_detection = always_run or tracking_requires_detection
+            # --- END OF FIX ---
             
             current_regions_for_processing = []
             if need_palm_detection:
@@ -177,10 +186,8 @@ class CompleteGestureEngine:
                 self._smooth_detection_boxes(regions_nms)
                 current_regions_for_processing = regions_nms
             else:
-                # In a real tracking benchmark, we'd use previous regions.
-                # For simplicity here, we just run palm detection if not forced.
-                regions_nms = self._run_palm_detection(resized_frame_for_input)
-                current_regions_for_processing = regions_nms
+                # Use the tracked regions from the previous frame
+                current_regions_for_processing = self.params.get('previous_frame_processed_regions', [])
 
             timings['palm_detection_inference_ms'] = (time.perf_counter() - pd_start_time) * 1000
 
@@ -205,6 +212,8 @@ class CompleteGestureEngine:
 
         except Exception as e:
             print(f"Error in benchmark frame processing: {e}")
+            import traceback
+            traceback.print_exc()
             return frame, {'error': str(e)}
 
     

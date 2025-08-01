@@ -104,6 +104,13 @@ class BenchmarkWorker(QThread):
                 
                 for i, img_path in enumerate(image_files):
                     if not self.is_running: break
+                    
+                    # --- FIX: Reset engine state for each static image ---
+                    # This prevents tracking/smoothing artifacts from the previous image
+                    # and forces a fresh palm detection for every new picture.
+                    engine.params['previous_frame_processed_regions'] = []
+                    # --- END OF FIX ---
+
                     self.progress_updated.emit(i + 1, total_frames, os.path.basename(img_path))
                     frame = cv2.imread(img_path)
                     if frame is None: continue

@@ -15,7 +15,7 @@
         "detection_smoothing_alpha": 0.6,
         "gesture_smoothing_frames": 8,
         "landmark_score_for_palm_redetection_threshold": 0.5,
-        "always_run_palm_detection": false,
+        "always_run_palm_detection": true,
         "show_landmarks": true,
         "show_static_gestures": true,
         "enable_finger_detection": true,
@@ -346,6 +346,6 @@
         },
         "browser_right_hand_mode": "cursor",
         "browser_iloveyou_switch_cooldown": 1.0,
-        "browser_last_iloveyou_switch": 1752128777.4274223
+        "browser_last_iloveyou_switch": 1754030072.167629
     }
 }
