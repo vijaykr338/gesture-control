@@ -10,16 +10,154 @@ import numpy as np
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, 
                              QLabel, QFrame, QFileDialog, QGroupBox, QWidget,
                              QScrollArea, QProgressBar, QComboBox, QCheckBox,
-                             QDoubleSpinBox, QSpinBox, QSlider, QTextEdit)
+                             QDoubleSpinBox, QSpinBox, QSlider, QTextEdit, QTabWidget)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QPixmap, QImage, QFont
+from PyQt6.QtGui import QPixmap, QImage, QFont, QIcon
+from PyQt6.QtWidgets import QStyle
 
 # Use the correct engine class from your project
 from gesture_engine import CompleteGestureEngine
 from config_manager import config_manager
 
-from openvino.runtime import opset13 as opset
-from openvino.runtime import Model
+from openvino import opset13 as opset
+from openvino import Model
+
+
+class DeviceConfigDialog(QDialog):
+    """Dialog for configuring inference devices for each model."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("🔧 Device Configuration")
+        self.setModal(True)
+        self.setMinimumSize(500, 250)
+        
+        # Get available devices
+        self.available_devices = self._get_available_devices()
+        self.device_configs = {}
+        
+        self.setup_ui()
+        self.load_current_config()
+
+    def _get_available_devices(self):
+        """Get list of available OpenVINO devices."""
+        try:
+            import openvino as ov
+            core = ov.Core()
+            devices = list(core.available_devices)
+            
+            # Add device details
+            device_info = {}
+            for device in devices:
+                try:
+                    full_name = core.get_property(device, "FULL_DEVICE_NAME")
+                    device_info[device] = f"{device}: {full_name}"
+                except:
+                    device_info[device] = device
+            
+            return device_info
+        except Exception as e:
+            print(f"Error getting devices: {e}")
+            return {"CPU": "CPU: Default Processor", "AUTO": "AUTO: Automatic Selection"}
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Header
+        header = QLabel("🔧 Model Device Configuration")
+        header.setStyleSheet("""
+            font-size: 16px; 
+            font-weight: bold; 
+            color: #00ffff; 
+            margin-bottom: 10px;
+            padding: 8px;
+            background-color: #2d2d30;
+            border-radius: 6px;
+        """)
+        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(header)
+
+        # Model configuration
+        models_group = QGroupBox("Model Device Assignment")
+        models_layout = QGridLayout(models_group)
+        
+        # Define models and their descriptions
+        self.model_configs = {
+            'palm_detection': {
+                'name': 'Palm Detection Model',
+                'description': 'Detects hand regions in the frame',
+                'default': 'CPU'
+            },
+            'hand_landmarks': {
+                'name': 'Hand Landmarks Model', 
+                'description': 'Extracts 21 hand keypoints',
+                'default': 'CPU'
+            },
+            'gesture_embedder': {
+                'name': 'Gesture Embedder Model',
+                'description': 'Creates gesture feature embeddings',
+                'default': 'AUTO'
+            },
+            'gesture_classifier': {
+                'name': 'Gesture Classifier Model',
+                'description': 'Classifies gestures from embeddings',
+                'default': 'AUTO'
+            }
+        }
+
+        self.device_combos = {}
+        
+        row = 0
+        for model_key, model_info in self.model_configs.items():
+            # Model name
+            name_label = QLabel(model_info['name'])
+            name_label.setStyleSheet("font-weight: bold; color: #ffffff;")
+            models_layout.addWidget(name_label, row, 0)
+            
+            # Device dropdown
+            device_combo = QComboBox()
+            device_combo.addItems(list(self.available_devices.keys()))
+            device_combo.setCurrentText(model_info['default'])
+            device_combo.setMinimumWidth(120)
+            models_layout.addWidget(device_combo, row, 1)
+            
+            # Description
+            desc_label = QLabel(model_info['description'])
+            desc_label.setStyleSheet("color: #aaaaaa; font-style: italic;")
+            models_layout.addWidget(desc_label, row, 2)
+            
+            self.device_combos[model_key] = device_combo
+            row += 1
+
+        layout.addWidget(models_group)
+
+        # Action buttons
+        button_layout = QHBoxLayout()
+        
+        cancel_btn = QPushButton("❌ Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        
+        apply_btn = QPushButton("✅ Apply")
+        apply_btn.clicked.connect(self.accept)
+        
+        button_layout.addStretch()
+        button_layout.addWidget(cancel_btn)
+        button_layout.addWidget(apply_btn)
+        
+        layout.addLayout(button_layout)
+
+    def load_current_config(self):
+        """Load current device configuration if available."""
+        for model_key, combo in self.device_combos.items():
+            default_device = self.model_configs[model_key]['default']
+            combo.setCurrentText(default_device)
+
+    def get_device_configuration(self):
+        """Get the current device configuration."""
+        return {model_key: combo.currentText() 
+                for model_key, combo in self.device_combos.items()}
 
 class BenchmarkWorker(QThread):
     """Runs the benchmark in a separate thread to avoid freezing the GUI."""
@@ -32,36 +170,43 @@ class BenchmarkWorker(QThread):
         self.config = config
         self.is_running = True
 
-    
-
     def run(self):
         try:
             # Create a dedicated engine instance for the benchmark
             engine = CompleteGestureEngine()
             
-            # --- FIX: Set device using the proper method BEFORE initialization ---
-            if 'inference_device' in self.config:
-                engine.model_manager.set_device(self.config['inference_device'])
+            # --- NEW: Set device configuration for each model ---
+            device_config = self.config.get('device_configuration', {})
+            if device_config:
+                print(f"🔧 Passing device configuration to ModelManager: {device_config}")
+                engine.model_manager.set_device_configuration(device_config)
+            
+            # Set global device (fallback for any models not specifically configured)
+            global_device = self.config.get('inference_device', 'CPU')
+            engine.model_manager.set_device(global_device)
+            # --- END NEW ---
             
             engine.params = self.config['engine_params']
             
-            # --- FIX: Initialize in benchmark mode (no camera) ---
+            # Initialize in benchmark mode (no camera)
+            # The ModelManager will now use the device_config set above
             if not engine.initialize(benchmark_mode=True):
                 self.benchmark_finished.emit({'error': 'Benchmark engine failed to initialize.'})
                 return
-            # --- END OF FIX ---
 
-            # --- FIX: Initialize psutil and get CPU core count ---
+            # --- REMOVED: The _apply_device_configuration call is no longer needed ---
+            # The logic is now handled inside ModelManager.initialize_models()
+            # ---
+
+            # Initialize psutil and get CPU core count
             process = psutil.Process(os.getpid())
-            cpu_count = psutil.cpu_count() or 1  # Get number of logical cores, default to 1
-            process.cpu_percent(interval=None)  # Initialize CPU measurement
-            # --- END OF FIX ---
+            cpu_count = psutil.cpu_count() or 1
+            process.cpu_percent(interval=None)
 
             source_path = self.config['source_path']
             is_video = any(source_path.lower().endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.mkv'])
             
             all_metrics = []
-            
             
             if is_video:
                 cap = cv2.VideoCapture(source_path)
@@ -82,10 +227,9 @@ class BenchmarkWorker(QThread):
                     
                     processed_frame, frame_metrics = engine.process_single_frame_benchmark(frame)
                     
-                    # --- FIX: Normalize CPU usage by core count ---
+                    # Normalize CPU usage by core count
                     frame_metrics['cpu_percent'] = process.cpu_percent(interval=None) / cpu_count
                     frame_metrics['memory_mb'] = process.memory_info().rss / (1024 * 1024)
-                    # --- END OF FIX ---
 
                     all_metrics.append(frame_metrics)
                     self.frame_processed.emit(processed_frame, frame_metrics)
@@ -110,10 +254,9 @@ class BenchmarkWorker(QThread):
                     
                     processed_frame, frame_metrics = engine.process_single_frame_benchmark(frame)
 
-                    # --- FIX: Normalize CPU usage by core count ---
+                    # Normalize CPU usage by core count
                     frame_metrics['cpu_percent'] = process.cpu_percent(interval=None) / cpu_count
                     frame_metrics['memory_mb'] = process.memory_info().rss / (1024 * 1024)
-                    # --- END OF FIX ---
 
                     all_metrics.append(frame_metrics)
                     self.frame_processed.emit(processed_frame, frame_metrics)
@@ -122,6 +265,11 @@ class BenchmarkWorker(QThread):
                         time.sleep(display_time)
 
             final_report = self._aggregate_report(all_metrics)
+            
+            # --- NEW: Add device configuration to report ---
+            final_report['device_configuration'] = device_config
+            # --- END NEW ---
+            
             self.benchmark_finished.emit(final_report)
 
         except Exception as e:
@@ -129,6 +277,7 @@ class BenchmarkWorker(QThread):
             import traceback
             traceback.print_exc()
             self.benchmark_finished.emit({'error': str(e)})
+
 
     def _aggregate_report(self, all_metrics):
         """Creates a final summary report from all frame metrics."""
@@ -192,6 +341,7 @@ class BenchmarkDialog(QDialog):
         self.worker = None
         self.final_report = {}
         self.source_path = ""
+        self.device_config = {}  # Store device configuration
         self.setup_ui()
         self.connect_signals()
 
@@ -200,7 +350,7 @@ class BenchmarkDialog(QDialog):
         
         # --- Left Panel: Configuration ---
         config_panel = QFrame()
-        config_panel.setFixedWidth(350)  # Slightly wider
+        config_panel.setFixedWidth(350)
         config_panel.setFrameShape(QFrame.Shape.StyledPanel)
         config_layout = QVBoxLayout(config_panel)
         
@@ -209,12 +359,28 @@ class BenchmarkDialog(QDialog):
         input_layout = QVBoxLayout()
         self.source_path_label = QLabel("No source selected.")
         self.source_path_label.setWordWrap(True)
-        self.browse_folder_btn = QPushButton("Select Image Folder")
-        self.browse_video_btn = QPushButton("Select Video File")
+        self.browse_folder_btn = QPushButton("📁 Select Image Folder")
+        self.browse_video_btn = QPushButton("🎥 Select Video File")
         input_layout.addWidget(self.source_path_label)
         input_layout.addWidget(self.browse_folder_btn)
         input_layout.addWidget(self.browse_video_btn)
         input_group.setLayout(input_layout)
+        
+        # --- NEW: Device Configuration Section ---
+        device_group = QGroupBox("Device Configuration")
+        device_layout = QVBoxLayout()
+        
+        self.device_status_label = QLabel("Using default device configuration")
+        self.device_status_label.setStyleSheet("color: #aaaaaa; font-style: italic;")
+        self.device_status_label.setWordWrap(True)
+        
+        self.configure_devices_btn = QPushButton("🔧 Configure Model Devices")
+        self.configure_devices_btn.setToolTip("Set which device each model should use for inference")
+        
+        device_layout.addWidget(self.device_status_label)
+        device_layout.addWidget(self.configure_devices_btn)
+        device_group.setLayout(device_layout)
+        # --- END NEW ---
         
         # Pipeline Parameters
         params_group = QGroupBox("Pipeline Parameters")
@@ -232,11 +398,10 @@ class BenchmarkDialog(QDialog):
         self.score_thresh_spin.setSingleStep(0.05)
         self.score_thresh_spin.setValue(config_manager.detection.score_threshold)
         
-        # Device selection
+        # Global device selection (fallback for non-configured models)
         self.device_combo = QComboBox()
-        self.device_combo.addItems(["CPU", "AUTO"])  # Add GPU options if available
+        self.device_combo.addItems(["CPU", "AUTO"])
         try:
-            # Try to detect available devices
             import openvino as ov
             core = ov.Core()
             available_devices = core.available_devices
@@ -252,7 +417,7 @@ class BenchmarkDialog(QDialog):
         params_layout.addWidget(self.input_size_combo, 1, 1)
         params_layout.addWidget(QLabel("Score Threshold:"), 2, 0)
         params_layout.addWidget(self.score_thresh_spin, 2, 1)
-        params_layout.addWidget(QLabel("Inference Device:"), 3, 0)
+        params_layout.addWidget(QLabel("Global Device:"), 3, 0)
         params_layout.addWidget(self.device_combo, 3, 1)
         params_group.setLayout(params_layout)
         
@@ -266,8 +431,8 @@ class BenchmarkDialog(QDialog):
         
         self.image_display_label = QLabel("Image Display Time: 2.0s")
         self.image_display_slider = QSlider(Qt.Orientation.Horizontal)
-        self.image_display_slider.setRange(5, 100)  # 0.5s to 10.0s
-        self.image_display_slider.setValue(20)  # 2.0s
+        self.image_display_slider.setRange(5, 100)
+        self.image_display_slider.setValue(20)
         self.image_display_slider.valueChanged.connect(
             lambda v: self.image_display_label.setText(f"Image Display Time: {v/10:.1f}s")
         )
@@ -291,6 +456,7 @@ class BenchmarkDialog(QDialog):
         self.export_btn.setMinimumHeight(40)
 
         config_layout.addWidget(input_group)
+        config_layout.addWidget(device_group)  # NEW: Add device group
         config_layout.addWidget(params_group)
         config_layout.addWidget(timing_group)
         config_layout.addStretch()
@@ -305,7 +471,7 @@ class BenchmarkDialog(QDialog):
         
         self.visualizer_label = QLabel("Visualizer will appear here.")
         self.visualizer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.visualizer_label.setMinimumSize(800, 600)  # Larger minimum size
+        self.visualizer_label.setMinimumSize(800, 600)
         self.visualizer_label.setStyleSheet("background-color: #1e1e1e; border: 1px solid #3e3e42;")
         
         self.progress_bar = QProgressBar()
@@ -320,7 +486,7 @@ class BenchmarkDialog(QDialog):
 
         # --- Right Panel: Results ---
         results_panel = QFrame()
-        results_panel.setFixedWidth(400)  # Wider for better results display
+        results_panel.setFixedWidth(400)
         results_panel.setFrameShape(QFrame.Shape.StyledPanel)
         results_layout = QVBoxLayout(results_panel)
         
@@ -343,7 +509,6 @@ class BenchmarkDialog(QDialog):
         results_group = QGroupBox("Benchmark Results")
         results_group_layout = QVBoxLayout(results_group)
         
-        # Use QTextEdit for better formatting and scrolling
         self.results_text = QTextEdit()
         self.results_text.setReadOnly(True)
         self.results_text.setPlainText("Run a test to see detailed results here.")
@@ -366,9 +531,39 @@ class BenchmarkDialog(QDialog):
     def connect_signals(self):
         self.browse_folder_btn.clicked.connect(lambda: self.browse_source(is_folder=True))
         self.browse_video_btn.clicked.connect(lambda: self.browse_source(is_folder=False))
+        self.configure_devices_btn.clicked.connect(self.open_device_config)  # NEW
         self.start_btn.clicked.connect(self.start_benchmark)
         self.stop_btn.clicked.connect(self.stop_benchmark)
         self.export_btn.clicked.connect(self.export_results)
+
+    def open_device_config(self):
+        """Open the device configuration dialog."""
+        dialog = DeviceConfigDialog(self)
+        
+        # Load current configuration if available
+        if self.device_config:
+            for model_key, device in self.device_config.items():
+                if model_key in dialog.device_combos:
+                    dialog.device_combos[model_key].setCurrentText(device)
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.device_config = dialog.get_device_configuration()
+            self.update_device_status_display()
+
+    def update_device_status_display(self):
+        """Update the device status label with current configuration."""
+        if self.device_config:
+            config_lines = []
+            for model, device in self.device_config.items():
+                model_name = model.replace('_', ' ').title()
+                config_lines.append(f"{model_name}: {device}")
+            
+            status_text = "Custom configuration:\n" + "\n".join(config_lines)
+            self.device_status_label.setText(status_text)
+            self.device_status_label.setStyleSheet("color: #00ff00; font-weight: bold;")
+        else:
+            self.device_status_label.setText("Using default device configuration")
+            self.device_status_label.setStyleSheet("color: #aaaaaa; font-style: italic;")
 
     def browse_source(self, is_folder=False):
         if is_folder:
@@ -395,7 +590,8 @@ class BenchmarkDialog(QDialog):
             "engine_params": params,
             "realtime_playback": self.realtime_playback_cb.isChecked(),
             "image_display_time": self.image_display_slider.value() / 10.0,
-            "inference_device": self.device_combo.currentText()
+            "inference_device": self.device_combo.currentText(),
+            "device_configuration": self.device_config  # NEW: Include device config
         }
         
         self.worker = BenchmarkWorker(config)
@@ -461,9 +657,19 @@ class BenchmarkDialog(QDialog):
         lines.append(f"Cores:         {report.get('system_cpu_cores', 'Unknown')}")
         lines.append(f"RAM:           {report.get('system_ram_gb', 'Unknown')} GB")
         lines.append(f"OS:            {report.get('system_os', 'Unknown')}")
-        lines.append(f"Device:        {self.device_combo.currentText()}")
+        lines.append(f"Global Device: {self.device_combo.currentText()}")
         lines.append(f"Timestamp:     {report.get('timestamp', 'Unknown')}")
         lines.append("")
+        
+        # --- NEW: Device Configuration Section ---
+        if self.device_config:
+            lines.append("🔧 DEVICE CONFIGURATION")
+            lines.append("-" * 30)
+            for model, device in self.device_config.items():
+                model_name = model.replace('_', ' ').title()
+                lines.append(f"{model_name:<20} {device}")
+            lines.append("")
+        # --- END NEW ---
         
         # Overall Performance
         lines.append("⚡ OVERALL PERFORMANCE")
@@ -498,12 +704,11 @@ class BenchmarkDialog(QDialog):
                     lines.append(f"  95th %ile:   {report[p95_key]:.2f} ms")
                 lines.append("")
         
-        # --- FIX: Clarify that the usage is for the total system ---
+        # Resource Usage
         lines.append("📊 RESOURCE USAGE (% of Total System)")
         lines.append("-" * 40)
         lines.append(f"Peak CPU:      {report.get('max_cpu_percent', 0):.1f}%")
         lines.append(f"Avg CPU:       {report.get('avg_cpu_percent', 0):.1f}%")
-        # --- END OF FIX ---
         lines.append(f"Peak Memory:   {report.get('max_memory_mb', 0):.1f} MB")
         lines.append(f"Avg Memory:    {report.get('avg_memory_mb', 0):.1f} MB")
         lines.append("")
@@ -518,9 +723,7 @@ class BenchmarkDialog(QDialog):
         lines.append("")
         
         return "\n".join(lines)
-    
 
-    
     def export_results(self):
         if not self.final_report or "error" in self.final_report: 
             return
@@ -544,7 +747,8 @@ class BenchmarkDialog(QDialog):
                     'input_size': int(self.input_size_combo.currentText()),
                     'score_threshold': self.score_thresh_spin.value(),
                     'always_palm_detection': self.always_palm_cb.isChecked(),
-                    'inference_device': self.device_combo.currentText(),
+                    'global_device': self.device_combo.currentText(),
+                    'device_configuration': self.device_config,  # NEW
                     'source_file': os.path.basename(self.source_path) if self.source_path else 'Unknown'
                 }
                 
