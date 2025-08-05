@@ -10,7 +10,8 @@ import numpy as np
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, 
                              QLabel, QFrame, QFileDialog, QGroupBox, QWidget,
                              QScrollArea, QProgressBar, QComboBox, QCheckBox,
-                             QDoubleSpinBox, QSpinBox, QSlider, QTextEdit, QTabWidget)
+                             QDoubleSpinBox, QSpinBox, QSlider, QTextEdit, QTabWidget,
+                             QApplication)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap, QImage, QFont, QIcon
 from PyQt6.QtWidgets import QStyle
@@ -21,7 +22,6 @@ from config_manager import config_manager
 
 from openvino import opset13 as opset
 from openvino import Model
-
 
 class DeviceConfigDialog(QDialog):
     """Dialog for configuring inference devices for each model."""
@@ -336,8 +336,10 @@ class BenchmarkDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("🔬 Benchmark Studio")
-        # Make it fullscreen
-        self.showMaximized()
+        
+        # NEW: Smart window sizing based on screen dimensions
+        self._setup_window_size()
+        
         self.worker = None
         self.final_report = {}
         self.source_path = ""
@@ -345,12 +347,52 @@ class BenchmarkDialog(QDialog):
         self.setup_ui()
         self.connect_signals()
 
+    def _setup_window_size(self):
+        """Set window size based on current screen size for safety"""
+        # Get the primary screen geometry
+        screen = QApplication.primaryScreen()
+        screen_geometry = screen.geometry()
+        screen_width = screen_geometry.width()
+        screen_height = screen_geometry.height()
+        
+        print(f"🖥️ Detected screen size: {screen_width}x{screen_height}")
+        
+        # Calculate safe window dimensions (further reduced height)
+        window_width = int(screen_width * 0.70)   # Reduced from 0.75
+        window_height = int(screen_height * 0.60)  # Reduced from 0.65
+        
+        # Ensure minimum size for usability (further reduced minimums)
+        min_width = 850   # Reduced from 900
+        min_height = 500  # Reduced from 550
+        
+        window_width = max(window_width, min_width)
+        window_height = max(window_height, min_height)
+        
+        # Ensure it doesn't exceed screen bounds
+        window_width = min(window_width, screen_width - 150)
+        window_height = min(window_height, screen_height - 150)
+        
+        print(f"🔧 Setting benchmark window size: {window_width}x{window_height}")
+        
+        # Set the window size and center it
+        self.resize(window_width, window_height)
+        
+        # Center the window on screen
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        self.move(x, y)
+        
+        # Set minimum size to prevent it from being too small
+        self.setMinimumSize(min_width, min_height)
+
     def setup_ui(self):
         main_layout = QHBoxLayout(self)
         
-        # --- Left Panel: Configuration ---
+        # --- Left Panel: Configuration (adjust width based on window size) ---
         config_panel = QFrame()
-        config_panel.setFixedWidth(350)
+        # Make config panel width proportional to window width
+        config_width = min(350, self.width() // 4)
+        config_panel.setFixedWidth(config_width)
         config_panel.setFrameShape(QFrame.Shape.StyledPanel)
         config_layout = QVBoxLayout(config_panel)
         
@@ -442,7 +484,7 @@ class BenchmarkDialog(QDialog):
         timing_layout.addWidget(self.image_display_slider, 2, 0, 1, 2)
         timing_group.setLayout(timing_layout)
 
-        # Control Buttons
+        # --- BUTTONS MOVED TO RIGHT PANEL ---
         self.start_btn = QPushButton("▶️ START TEST")
         self.start_btn.setEnabled(False)
         self.start_btn.setMinimumHeight(40)
@@ -456,22 +498,23 @@ class BenchmarkDialog(QDialog):
         self.export_btn.setMinimumHeight(40)
 
         config_layout.addWidget(input_group)
-        config_layout.addWidget(device_group)  # NEW: Add device group
+        config_layout.addWidget(device_group)
         config_layout.addWidget(params_group)
         config_layout.addWidget(timing_group)
         config_layout.addStretch()
-        config_layout.addWidget(self.start_btn)
-        config_layout.addWidget(self.stop_btn)
-        config_layout.addWidget(self.export_btn)
 
-        # --- Center Panel: Visualizer ---
+        # --- Center Panel: Visualizer (responsive sizing) ---
         center_panel = QFrame()
         center_panel.setFrameShape(QFrame.Shape.StyledPanel)
         center_layout = QVBoxLayout(center_panel)
         
         self.visualizer_label = QLabel("Visualizer will appear here.")
         self.visualizer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.visualizer_label.setMinimumSize(800, 600)
+        
+        # Make visualizer size responsive to window size
+        viz_min_width = max(400, (self.width() - config_width - 400) // 2)
+        viz_min_height = max(300, self.height() // 2)
+        self.visualizer_label.setMinimumSize(viz_min_width, viz_min_height)
         self.visualizer_label.setStyleSheet("background-color: #1e1e1e; border: 1px solid #3e3e42;")
         
         self.progress_bar = QProgressBar()
@@ -484,9 +527,11 @@ class BenchmarkDialog(QDialog):
         center_layout.addWidget(self.progress_bar)
         center_layout.addWidget(self.progress_label)
 
-        # --- Right Panel: Results ---
+        # --- Right Panel: Results (responsive width) ---
         results_panel = QFrame()
-        results_panel.setFixedWidth(400)
+        # Make results panel width proportional to window width (REDUCED SIZE)
+        results_width = min(320, self.width() // 4)
+        results_panel.setFixedWidth(results_width)
         results_panel.setFrameShape(QFrame.Shape.StyledPanel)
         results_layout = QVBoxLayout(results_panel)
         
@@ -512,10 +557,13 @@ class BenchmarkDialog(QDialog):
         self.results_text = QTextEdit()
         self.results_text.setReadOnly(True)
         self.results_text.setPlainText("Run a test to see detailed results here.")
-        self.results_text.setMinimumHeight(300)
         
-        # Set monospace font for better alignment
-        font = QFont("Consolas", 9)
+        # Make results text height responsive
+        results_min_height = max(200, self.height() // 3)
+        self.results_text.setMinimumHeight(results_min_height)
+        
+        # Set monospace font for better alignment (smaller size for better fit)
+        font = QFont("Consolas", 8)
         font.setStyleHint(QFont.StyleHint.Monospace)
         self.results_text.setFont(font)
         
@@ -523,6 +571,12 @@ class BenchmarkDialog(QDialog):
 
         results_layout.addWidget(sys_info_group)
         results_layout.addWidget(results_group, 1)
+        
+        # --- BUTTONS MOVED HERE ---
+        results_layout.addStretch()
+        results_layout.addWidget(self.start_btn)
+        results_layout.addWidget(self.stop_btn)
+        results_layout.addWidget(self.export_btn)
 
         main_layout.addWidget(config_panel)
         main_layout.addWidget(center_panel, 1)
