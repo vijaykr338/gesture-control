@@ -148,6 +148,12 @@ class DeviceConfigDialog(QDialog):
         
         layout.addLayout(button_layout)
 
+    def load_current_config(self):
+        """Load current configuration - placeholder method."""
+        # This method can be used to load saved device configurations
+        # For now, it's a placeholder to prevent the AttributeError
+        pass
+
     def get_device_configuration(self):
         """Get the current device configuration."""
         return {model_key: combo.currentText() 
