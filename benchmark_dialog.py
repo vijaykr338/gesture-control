@@ -148,16 +148,11 @@ class DeviceConfigDialog(QDialog):
         
         layout.addLayout(button_layout)
 
-    def load_current_config(self):
-        """Load current device configuration if available."""
-        for model_key, combo in self.device_combos.items():
-            default_device = self.model_configs[model_key]['default']
-            combo.setCurrentText(default_device)
-
     def get_device_configuration(self):
         """Get the current device configuration."""
         return {model_key: combo.currentText() 
                 for model_key, combo in self.device_combos.items()}
+
 
 class BenchmarkWorker(QThread):
     """Runs the benchmark in a separate thread to avoid freezing the GUI."""
@@ -193,10 +188,6 @@ class BenchmarkWorker(QThread):
             if not engine.initialize(benchmark_mode=True):
                 self.benchmark_finished.emit({'error': 'Benchmark engine failed to initialize.'})
                 return
-
-            # --- REMOVED: The _apply_device_configuration call is no longer needed ---
-            # The logic is now handled inside ModelManager.initialize_models()
-            # ---
 
             # Initialize psutil and get CPU core count
             process = psutil.Process(os.getpid())
@@ -277,7 +268,6 @@ class BenchmarkWorker(QThread):
             import traceback
             traceback.print_exc()
             self.benchmark_finished.emit({'error': str(e)})
-
 
     def _aggregate_report(self, all_metrics):
         """Creates a final summary report from all frame metrics."""
